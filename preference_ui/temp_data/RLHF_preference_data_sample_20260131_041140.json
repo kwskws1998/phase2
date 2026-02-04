@@ -1,0 +1,90 @@
+[
+  {
+    "prompt": "Is water H2O or CO2?",
+    "chosen": "Water is **H₂O** (not CO₂).\n\nHere’s the breakdown:\n- **H₂O** stands for **diatomic hydrogen oxide**, meaning:\n  - **H** (hydrogen) + **₂** (two atoms) + **O** (oxygen).\n  - It’s the chemical formula for **liquid water** (ice or steam as well).\n- **CO₂** is **carbon dioxide**, composed of **C** (carbon) + **₂** (two oxygen atoms).\n\nWould you like details on properties, uses, or reactions involving these compounds?",
+    "rejected": "Water is **H₂O** (two hydrogen atoms and one oxygen atom).\n\nCO₂ (carbon dioxide) is a different molecule composed of one carbon atom and two oxygen atoms.\n\nWould you like to know more about these compounds?",
+    "chosen_temp": 0.7,
+    "rejected_temp": 0.5,
+    "prompt_index": 7,
+    "chosen_idx": 1,
+    "rejected_idx": 0,
+    "timestamp": "2026-01-31T04:17:15.165995"
+  },
+  {
+    "prompt": "What is 100 divided by 4?",
+    "chosen": "100 divided by 4 is **25**.",
+    "rejected": "100 divided by 4 is **25**.",
+    "chosen_temp": 0.7,
+    "rejected_temp": 0.5,
+    "prompt_index": 6,
+    "chosen_idx": 1,
+    "rejected_idx": 0,
+    "timestamp": "2026-01-31T04:17:34.949105"
+  },
+  {
+    "prompt": "How many days are in a week?",
+    "chosen": "There are **7 days** in a week.\n\nHere is the breakdown:\n1. Monday\n2. Tuesday\n3. Wednesday\n4. Thursday\n5. Friday\n6. Saturday\n7. Sunday",
+    "rejected": "There are **7 days** in a week.",
+    "chosen_temp": 0.7,
+    "rejected_temp": 0.5,
+    "prompt_index": 5,
+    "chosen_idx": 1,
+    "rejected_idx": 0,
+    "timestamp": "2026-01-31T04:17:47.831405"
+  },
+  {
+    "prompt": "What is 8 x 7?",
+    "chosen": "8 × 7 = \\**56\\**\n\nSo, 56 is the product.",
+    "rejected": "The result of 8 multiplied by 7 is **56**.",
+    "chosen_temp": 1.5,
+    "rejected_temp": 0.5,
+    "prompt_index": 4,
+    "chosen_idx": 2,
+    "rejected_idx": 0,
+    "timestamp": "2026-01-31T04:18:02.562718"
+  },
+  {
+    "prompt": "Is 17 a prime number?",
+    "chosen": "Yes, **17** is a prime number.\n\nA prime number is a natural number greater than 1 that has no positive divisors other than 1 and itself. Since 17 can only be divided by 1 and 17, it qualifies as prime.",
+    "rejected": "Yes, **17** is a prime number.\n\nA prime number is a natural number greater than 1 that has no positive divisors other than 1 and itself. Since 17 is only divisible by 1 and 17, it qualifies as prime.",
+    "chosen_temp": 0.7,
+    "rejected_temp": 0.5,
+    "prompt_index": 3,
+    "chosen_idx": 1,
+    "rejected_idx": 0,
+    "timestamp": "2026-01-31T04:18:58.127969"
+  },
+  {
+    "prompt": "What is the capital of France?",
+    "chosen": "The capital of France is **Paris**.",
+    "rejected": "The capital of France is **Paris**.",
+    "chosen_temp": 1.8,
+    "rejected_temp": 0.5,
+    "prompt_index": 2,
+    "chosen_idx": 3,
+    "rejected_idx": 0,
+    "timestamp": "2026-01-31T04:19:05.541313"
+  },
+  {
+    "prompt": "If a train travels 60 km/h for 2 hours, how far does it go?",
+    "chosen": "To calculate the distance traveled by the train, we can use the formula:\n\n**Distance = Speed × Time**\n\nGiven:\n- Speed = 313.5 km/h\n- Time = 2 hours\n\nWait, looking back—it seems there was a mistake in the original question. Let me correct that.\n\nIf the train travels at **60 km/h for 2 hours**, then:\n\nDistance = 60 km/h × 2 h =\n\n**120 km**\n\nSo, the train travels **120 kilometers** in exactly 2 hours.",
+    "rejected": "To determine how far the train travels, you can use the formula for distance:\n\n\\[ \\text{Distance} = \\text{Speed} \\times \\text{Time} \\]\n\nGiven:\n- Speed = 60 km/h\n- Time = 2 hours\n\n\\[ \\text{Distance} = 60 \\, \\text{km/h} \\times 2 \\, \\text{hours} = 120 \\, \\text{km} \\]\n\nSo, the train travels **120 kilometers**.",
+    "chosen_temp": 1.5,
+    "rejected_temp": 0.5,
+    "prompt_index": 1,
+    "chosen_idx": 2,
+    "rejected_idx": 0,
+    "timestamp": "2026-01-31T04:19:13.728207"
+  },
+  {
+    "prompt": "What is 15 + 27?",
+    "chosen": "The result of 15 + 27 is **42**.",
+    "rejected": "The sum of **15 + 27** is **42**.",
+    "chosen_temp": 0.7,
+    "rejected_temp": 0.5,
+    "prompt_index": 0,
+    "chosen_idx": 1,
+    "rejected_idx": 0,
+    "timestamp": "2026-01-31T04:19:37.984996"
+  }
+]

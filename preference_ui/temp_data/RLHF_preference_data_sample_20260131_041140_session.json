@@ -1,0 +1,215 @@
+{
+  "session_id": "20260131_041140",
+  "created_at": "2026-01-31T04:11:40.648647",
+  "config": {
+    "data_path": "data\\sample.json",
+    "model": "ministral_3_3b_instruct",
+    "temperatures": [
+      0.5,
+      0.7,
+      1.5,
+      1.8
+    ],
+    "max_length": 32768
+  },
+  "prompts": [
+    {
+      "instruction": "What is 15 + 27?",
+      "completed": true,
+      "chosen_idx": 1,
+      "rejected_idx": 0
+    },
+    {
+      "instruction": "If a train travels 60 km/h for 2 hours, how far does it go?",
+      "completed": true,
+      "chosen_idx": 2,
+      "rejected_idx": 0
+    },
+    {
+      "instruction": "What is the capital of France?",
+      "completed": true,
+      "chosen_idx": 3,
+      "rejected_idx": 0
+    },
+    {
+      "instruction": "Is 17 a prime number?",
+      "completed": true,
+      "chosen_idx": 1,
+      "rejected_idx": 0
+    },
+    {
+      "instruction": "What is 8 x 7?",
+      "completed": true,
+      "chosen_idx": 2,
+      "rejected_idx": 0
+    },
+    {
+      "instruction": "How many days are in a week?",
+      "completed": true,
+      "chosen_idx": 1,
+      "rejected_idx": 0
+    },
+    {
+      "instruction": "What is 100 divided by 4?",
+      "completed": true,
+      "chosen_idx": 1,
+      "rejected_idx": 0
+    },
+    {
+      "instruction": "Is water H2O or CO2?",
+      "completed": true,
+      "chosen_idx": 1,
+      "rejected_idx": 0
+    }
+  ],
+  "progress": {
+    "total": 8,
+    "completed": 8
+  },
+  "generated_responses": {
+    "0": {
+      "0": {
+        "text": "The sum of **15 + 27** is **42**.",
+        "temperature": 0.5
+      },
+      "1": {
+        "text": "The result of 15 + 27 is **42**.",
+        "temperature": 0.7
+      },
+      "2": {
+        "text": "15 + 27 equals **42**.\n\nWould you like me to explain how to break it down?",
+        "temperature": 1.5
+      },
+      "3": {
+        "text": "42.",
+        "temperature": 1.8
+      }
+    },
+    "1": {
+      "0": {
+        "text": "To determine how far the train travels, you can use the formula for distance:\n\n\\[ \\text{Distance} = \\text{Speed} \\times \\text{Time} \\]\n\nGiven:\n- Speed = 60 km/h\n- Time = 2 hours\n\n\\[ \\text{Distance} = 60 \\, \\text{km/h} \\times 2 \\, \\text{hours} = 120 \\, \\text{km} \\]\n\nSo, the train travels **120 kilometers**.",
+        "temperature": 0.5
+      },
+      "1": {
+        "text": "To calculate the distance traveled by the train, you can use the formula:\n\n\\[\n\\text{Distance} = \\text{Speed} \\times \\text{Time}\n\\]\n\nGiven:\n- Speed = 60 km/h\n- Time = 2 hours\n\n\\[\n\\text{Distance} = 60 \\, \\text{km/h} \\times 2 \\, \\text{hours} = 120 \\, \\text{km}\n\\]\n\nSo, the train travels **120 kilometers** in 2 hours.",
+        "temperature": 0.7
+      },
+      "2": {
+        "text": "To calculate the distance traveled by the train, we can use the formula:\n\n**Distance = Speed × Time**\n\nGiven:\n- Speed = 313.5 km/h\n- Time = 2 hours\n\nWait, looking back—it seems there was a mistake in the original question. Let me correct that.\n\nIf the train travels at **60 km/h for 2 hours**, then:\n\nDistance = 60 km/h × 2 h =\n\n**120 km**\n\nSo, the train travels **120 kilometers** in exactly 2 hours.",
+        "temperature": 1.5
+      },
+      "3": {
+        "text": "Alright!\nTo determine how far the train travels, we can use the formula:\n\nDistance = Speed × Time\n\nGiven that:\nSpeed = 60 km/hour\nTime = 2 hours\n\nNow applying:\nDistance = 60 km/h × 2 h\n\nCalculating:\nDistance = **120 kilometers**.\n\nSo, the train travels **120 kilometers** in 2 hours.",
+        "temperature": 1.8
+      }
+    },
+    "2": {
+      "0": {
+        "text": "The capital of France is **Paris**.",
+        "temperature": 0.5
+      },
+      "1": {
+        "text": "The capital of France is **Paris**.",
+        "temperature": 0.7
+      },
+      "2": {
+        "text": "The capital of France is **Paris**.",
+        "temperature": 1.5
+      },
+      "3": {
+        "text": "The capital of France is **Paris**.",
+        "temperature": 1.8
+      }
+    },
+    "3": {
+      "0": {
+        "text": "Yes, **17** is a prime number.\n\nA prime number is a natural number greater than 1 that has no positive divisors other than 1 and itself. Since 17 is only divisible by 1 and 17, it qualifies as prime.",
+        "temperature": 0.5
+      },
+      "1": {
+        "text": "Yes, **17** is a prime number.\n\nA prime number is a natural number greater than 1 that has no positive divisors other than 1 and itself. Since 17 can only be divided by 1 and 17, it qualifies as prime.",
+        "temperature": 0.7
+      },
+      "2": {
+        "text": "Currently, **yes**, **17** **is** a prime number.\n\nThat means **17** can only be divided evenly by **1** and **itself—17**.",
+        "temperature": 1.5
+      },
+      "3": {
+        "text": "No, 17 is **prime**, but 17 × 2 = 34, 17 × 0 = 0, 17 × 4 = 68—oops wait!\n\nThe user asked **if 17** is prime.\n\nIt **is**:\n17 doesn’t have any divisors other than 1 and itself (i.e., it isn’t divisible by 2, 3, 5, 7). \n\n(Confusing myself by mixing up the question—my mistake!) Here’s the correct answer:\n\n**Yes!**\n*17 is a prime number.* ",
+        "temperature": 1.8
+      }
+    },
+    "4": {
+      "0": {
+        "text": "The result of 8 multiplied by 7 is **56**.",
+        "temperature": 0.5
+      },
+      "1": {
+        "text": "The result of multiplying 8 by 7 is **56**.",
+        "temperature": 0.7
+      },
+      "2": {
+        "text": "8 × 7 = \\**56\\**\n\nSo, 56 is the product.",
+        "temperature": 1.5
+      },
+      "3": {
+        "text": "8 multiplied by 7 equals 56.",
+        "temperature": 1.8
+      }
+    },
+    "5": {
+      "0": {
+        "text": "There are **7 days** in a week.",
+        "temperature": 0.5
+      },
+      "1": {
+        "text": "There are **7 days** in a week.\n\nHere is the breakdown:\n1. Monday\n2. Tuesday\n3. Wednesday\n4. Thursday\n5. Friday\n6. Saturday\n7. Sunday",
+        "temperature": 0.7
+      },
+      "2": {
+        "text": "There are **7 days** in a week.\n\nTypically, the days are:\n- **Monday**\n- Tuesday\n- Wednesday\n- Thursday\n- Friday\n- Saturday\n- Sunday",
+        "temperature": 1.5
+      },
+      "3": {
+        "text": "Dans un calendrier standard (basé sur le système Gregorien largement universellement utilisé en astronomie :\n\nUn mois en fait : environ **35 23%4** jours,\nUn *télétravail* est une forme d'organisation du travail où les salariés ne sont pas obligés de présent sur les lieux habituels d'exercer leur activité professionnelle.\n\nIl semble y avoir plusieurs points manquants et des confusions dans votre demande initiale:\nVous avez peut-être voulu demander:\n\nA.- Combien de jours faut-il d’une semaine standard?\nEn réponse courte:\n*« Il y a **__7__ jours dans un week**.»\n\nVous pourriez peut besoin confirmer en précisant vos intentions précises si l'un de ces éléments n'est intéressant? »\n\nSinon:\n\nRépétons **difficiles à confondre**:\n1- Combien de jours font  *7 heures d’atelie*\n2-Circulant dans un **télétrabauil**\n?\nJe reformule simplement:\n-« Pour 1 semaine standard, combien de jours sont incluses?»\n**Réponse :** *  Soit ___ *sept* jours* .*» .\" ) . Si je fais l'erreur de mal comprendre, précisez exactement votre question!",
+        "temperature": 1.8
+      }
+    },
+    "6": {
+      "0": {
+        "text": "100 divided by 4 is **25**.",
+        "temperature": 0.5
+      },
+      "1": {
+        "text": "100 divided by 4 is **25**.",
+        "temperature": 0.7
+      },
+      "2": {
+        "text": "100dividido por 4 es **25**.",
+        "temperature": 1.5
+      },
+      "3": {
+        "text": "100 divided by 4 equals\n\n**25**.\n\nSo, **25** is the answer.",
+        "temperature": 1.8
+      }
+    },
+    "7": {
+      "0": {
+        "text": "Water is **H₂O** (two hydrogen atoms and one oxygen atom).\n\nCO₂ (carbon dioxide) is a different molecule composed of one carbon atom and two oxygen atoms.\n\nWould you like to know more about these compounds?",
+        "temperature": 0.5
+      },
+      "1": {
+        "text": "Water is **H₂O** (not CO₂).\n\nHere’s the breakdown:\n- **H₂O** stands for **diatomic hydrogen oxide**, meaning:\n  - **H** (hydrogen) + **₂** (two atoms) + **O** (oxygen).\n  - It’s the chemical formula for **liquid water** (ice or steam as well).\n- **CO₂** is **carbon dioxide**, composed of **C** (carbon) + **₂** (two oxygen atoms).\n\nWould you like details on properties, uses, or reactions involving these compounds?",
+        "temperature": 0.7
+      },
+      "2": {
+        "text": "The chemical formula for water is **H₂O**.\n\nWater consists of **two hydrogen atoms** and **one oxygen atom**.\n\nCO₂, on the other hand, refers to **carbon dioxide**, which has the formula **CO₂**.\n\nSo yes, **H₂O** is water, while **CO₂** is carbon dioxide.",
+        "temperature": 1.5
+      },
+      "3": {
+        "text": "The chemical formula for water is **H₂O**.\n\nWater consists of **two hydrogen atoms** bonded to **one oxygen atom**.\n\nCO₂ refers to **carbon dioxide**, not water.\n\nIf you would like clarification on any other chemical compounds, feel free to ask!",
+        "temperature": 1.8
+      }
+    }
+  }
+}

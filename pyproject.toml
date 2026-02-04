@@ -1,0 +1,28 @@
+[project]
+name = "aiffel_project"
+version = "0.1.0"
+description = ""
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "transformers>=5.0.0",
+    "torch",
+    "accelerate",
+    "datasets",
+    "safetensors",
+    "huggingface_hub",
+    "hf_xet",
+    "mistral-common>=1.8.6",
+    "pandas",
+    "pick>=2.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []
+
+[tool.uv]
+package = true
