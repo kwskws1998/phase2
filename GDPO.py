@@ -350,10 +350,12 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
         tokenizer: Tokenizer for decoding
         references: Ground truth references for accuracy check
         reward_config: Configuration dict with keys:
-            - use_conditioned_rewards (bool): Whether to condition easier rewards on accuracy
-            - condition_threshold (float): Threshold for accuracy to receive other rewards
+            - condition_threshold (float): Threshold for accuracy to grant easy rewards (default 1.0)
             - target_length (int): Target length for length penalty calculation
-            - uncertainty_threshold (float): Threshold for uncertainty penalty (default 0.6)
+            - uncertainty_threshold (float): Threshold for uncertainty (default 0.6)
+              When uncertainty_scores provided, hierarchical conditioning is applied:
+              - Uncertainty >= threshold: -1 penalty, acc=0, easy rewards=0
+              - Uncertainty < threshold: -u penalty, then accuracy controls easy rewards
         token_config: Token configuration class (default: Ministral3TokenConfig)
         num_objectives: Number of reward objectives (default 3)
         uncertainty_scores: Optional (Batch*Group,) tensor of soft-scaled uncertainty scores
@@ -387,7 +389,6 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
     # Parse reward_config
     if reward_config is None:
         reward_config = {}
-    use_conditioned_rewards = reward_config.get("use_conditioned_rewards", False)
     condition_threshold = reward_config.get("condition_threshold", 1.0)
     target_len = reward_config.get("target_length", 1024)
     
@@ -423,53 +424,49 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
         
         # 3. Accuracy Reward (Hard reward - computed first as it may condition others)
         # If references (ground truth texts) are provided, we check for containment or exact match.
-        # For now, we assume simple containment of the reference answer in the generated <answer> block.
         acc_score = 0.0
         if references and i < len(references):
-            ref_text = references[i]  # This might need alignment with Batch*Group
-            # In a real scenario, we'd parse the <answer> part and compare.
+            ref_text = references[i]
             # Simplified: Check if reference is inside generation.
             if ref_text in text:
                 acc_score = 1.0
         
-        # 4. Apply Conditioned Rewards (Paper Eq. 8)
-        # Easier rewards (format, length) are conditioned on harder rewards (accuracy AND uncertainty)
-        if use_conditioned_rewards:
-            # Check accuracy condition (difficult reward 1)
-            acc_condition_met = (acc_score >= condition_threshold)
+        # 4. Hierarchical Conditional Rewards (applied when uncertainty_scores provided)
+        # Level 1 (Hardest): Uncertainty → controls Accuracy and Easy rewards
+        # Level 2: Accuracy → controls Easy rewards (Format, Length)
+        uncertainty_reward = 0.0
+        
+        if uncertainty_scores is not None and i < len(uncertainty_scores):
+            u = uncertainty_scores[i]
+            if isinstance(u, torch.Tensor):
+                u = u.item()
+            uncertainty_threshold = reward_config.get("uncertainty_threshold", 0.6)
             
-            # Check uncertainty condition (difficult reward 2) - only if uncertainty provided
-            uncertainty_condition_met = True  # default: no uncertainty check
-            if uncertainty_scores is not None and i < len(uncertainty_scores):
-                u = uncertainty_scores[i]
-                if isinstance(u, torch.Tensor):
-                    u = u.item()
-                uncertainty_threshold = reward_config.get("uncertainty_threshold", 0.6)
-                uncertainty_condition_met = (u < uncertainty_threshold)
-            
-            # AND condition: both difficult rewards must meet their thresholds
-            difficult_condition_met = acc_condition_met and uncertainty_condition_met
-            
-            if not difficult_condition_met:
+            # Level 1: Uncertainty (hardest)
+            if u >= uncertainty_threshold:
+                # FAIL: Fixed penalty, zero out all lower levels
+                uncertainty_reward = -1.0
+                acc_score = 0.0
                 format_score = 0.0
                 length_score = 0.0
+            else:
+                # PASS: Proportional penalty (lower u = smaller penalty)
+                uncertainty_reward = -u
+                
+                # Level 2: Accuracy (second hardest)
+                if acc_score < condition_threshold:
+                    # Accuracy FAIL: Zero out easy rewards only
+                    format_score = 0.0
+                    length_score = 0.0
+                # else: Accuracy PASS → keep easy rewards as calculated
         
         rewards[i, 0] = format_score
         rewards[i, 1] = length_score
         rewards[i, 2] = acc_score
         
-        # 5. Uncertainty Reward (when uncertainty_scores provided)
+        # 5. Uncertainty Reward assignment
         if uncertainty_scores is not None:
-            uncertainty_threshold = reward_config.get("uncertainty_threshold", 0.6)
-            if i < len(uncertainty_scores):
-                u = uncertainty_scores[i]
-                if isinstance(u, torch.Tensor):
-                    u = u.item()
-                # Penalize if uncertainty exceeds threshold
-                if u >= uncertainty_threshold:
-                    rewards[i, 3] = -u  # Penalty (negative)
-                else:
-                    rewards[i, 3] = 0.0
+            rewards[i, 3] = uncertainty_reward
         
         # 6. Temperature Contrastive Reward (when temperature_rewards provided)
         if temperature_rewards is not None:

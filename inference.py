@@ -544,11 +544,13 @@ def has_model_files(path):
     return has_config and has_weights
 
 
-def find_model_path(model_name, base_dir=MODEL_BASE_DIR):
+def find_model_path(model_name, base_dir=None):
     """
     Find model path from model name.
     Searches in model/ and model/train/ directories.
     """
+    if base_dir is None:
+        base_dir = MODEL_BASE_DIR
     # 1. model/{model_name}
     path1 = os.path.join(base_dir, model_name)
     if os.path.exists(path1) and has_model_files(path1):
@@ -568,13 +570,15 @@ def find_model_path(model_name, base_dir=MODEL_BASE_DIR):
     return None
 
 
-def list_available_models(base_dir=MODEL_BASE_DIR):
+def list_available_models(base_dir=None):
     """
     List all available models in the model directory.
     """
+    if base_dir is None:
+        base_dir = MODEL_BASE_DIR
     models = []
     
-    if not os.path.exists(base_dir):
+    if not base_dir or not os.path.exists(base_dir):
         return models
     
     # model/ direct subdirectories (excluding train)
