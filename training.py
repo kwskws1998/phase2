@@ -344,6 +344,8 @@ def run_training(args):
             "uncertainty_full_sequence": args.gdpo_uncertainty_full_sequence,
             # Tool Correctness
             "tool_correctness_threshold": args.gdpo_tool_correctness_threshold,
+            # Memory Optimization
+            "sequential": args.gdpo_sequential,
             # Heteroscedastic weight (legacy, for heteroscedastic_gdpo before refactor)
             "heteroscedastic_weight": args.heteroscedastic_weight,
         }
@@ -449,6 +451,10 @@ if __name__ == "__main__":
     # GDPO Tool Correctness Arguments
     parser.add_argument("--gdpo_tool_correctness_threshold", type=float, default=1.5,
                         help="Tool correctness threshold for conditioned rewards (default: 1.5, ~75%% match required)")
+    
+    # GDPO Memory Optimization
+    parser.add_argument("--gdpo_sequential", action="store_true",
+                        help="Use sequential processing for lower memory (slower but fits on smaller GPUs)")
     
     # Heteroscedastic Loss Arguments
     parser.add_argument("--heteroscedastic_T", type=int, default=3,

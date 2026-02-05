@@ -89,6 +89,12 @@ python training.py --model_type ministral_3_3b_instruct --model_path model/train
 | `--gdpo_group_size` | 4 | Number of responses to generate per input |
 | `--gdpo_kl_coef` | 0.01 | KL divergence penalty coefficient |
 | `--gdpo_use_conditioned_rewards` | False | Condition easier rewards on harder ones |
+| `--gdpo_sequential` | False | Use sequential processing for lower memory (slower but fits on smaller GPUs) |
+
+**Memory Optimization:**
+- By default, GDPO generates all G samples in parallel, which is fast but uses more GPU memory
+- With `--gdpo_sequential`, samples are generated one at a time and stored on CPU, reducing peak GPU memory by ~G times
+- Use sequential mode when encountering OOM errors during GDPO training
 
 **Hierarchical Reward Thresholds:**
 

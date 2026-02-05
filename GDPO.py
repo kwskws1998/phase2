@@ -56,6 +56,9 @@ class GDPOBase:
         # Tool Reward config
         self.enable_tool_reward = self.gdpo_config.get("enable_tool_reward", False)
         self.tool_correctness_threshold = self.gdpo_config.get("tool_correctness_threshold", 1.5)
+        
+        # Memory Optimization config
+        self.sequential = self.gdpo_config.get("sequential", False)
     
     def generate_samples(
         self, 
@@ -102,6 +105,14 @@ class GDPOBase:
                     input_ids=input_ids, attention_mask=attention_mask, **gen_kwargs
                 )
                 
+                # Pad to same length before concatenation (sequences may have different lengths)
+                max_len = max(low_sequences.shape[1], high_sequences.shape[1])
+                pad_id = self.tokenizer.pad_token_id
+                if low_sequences.shape[1] < max_len:
+                    low_sequences = F.pad(low_sequences, (0, max_len - low_sequences.shape[1]), value=pad_id)
+                if high_sequences.shape[1] < max_len:
+                    high_sequences = F.pad(high_sequences, (0, max_len - high_sequences.shape[1]), value=pad_id)
+                
                 sequences = torch.cat([low_sequences, high_sequences], dim=0)
                 temperature_rewards = torch.cat([
                     torch.ones(B * self.G),      # Low temp → +1
@@ -117,6 +128,193 @@ class GDPOBase:
                 effective_G = self.G
         
         return sequences, temperature_rewards, effective_G
+    
+    def generate_samples_sequential(
+        self, 
+        model: torch.nn.Module, 
+        input_ids: torch.Tensor, 
+        attention_mask: torch.Tensor
+    ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], int]:
+        """
+        Generate samples one at a time for memory efficiency, storing on CPU.
+        
+        Args:
+            model: The language model
+            input_ids: Input token IDs (B, seq_len)
+            attention_mask: Attention mask (B, seq_len)
+        
+        Returns:
+            sequences_list: List of sequences on CPU (each B, seq_len)
+            temperature_rewards: Temperature labels or None (B * effective_G,)
+            effective_G: Actual group size (G or 2G)
+        """
+        B = input_ids.shape[0]
+        all_sequences = []
+        
+        gen_kwargs = {
+            "max_new_tokens": self.max_new_tokens,
+            "do_sample": True,
+            "top_p": 0.95,
+            "pad_token_id": self.tokenizer.pad_token_id,
+            "eos_token_id": self.tokenizer.eos_token_id,
+            "num_return_sequences": 1,  # Generate one at a time
+            "use_cache": False,
+        }
+        
+        with torch.no_grad():
+            if self.use_temp_contrastive:
+                # Low temp generation (chosen/positive) - one at a time
+                gen_kwargs["temperature"] = self.low_temp
+                for _ in range(self.G):
+                    seq = model.generate(
+                        input_ids=input_ids, attention_mask=attention_mask, **gen_kwargs
+                    )
+                    all_sequences.append(seq.cpu())
+                    del seq
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                
+                # High temp generation (rejected/negative) - one at a time
+                gen_kwargs["temperature"] = self.high_temp
+                for _ in range(self.G):
+                    seq = model.generate(
+                        input_ids=input_ids, attention_mask=attention_mask, **gen_kwargs
+                    )
+                    all_sequences.append(seq.cpu())
+                    del seq
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                
+                temperature_rewards = torch.cat([
+                    torch.ones(B * self.G),      # Low temp → +1
+                    -torch.ones(B * self.G)      # High temp → -1
+                ])
+                effective_G = 2 * self.G
+            else:
+                gen_kwargs["temperature"] = self.default_temp
+                for _ in range(self.G):
+                    seq = model.generate(
+                        input_ids=input_ids, attention_mask=attention_mask, **gen_kwargs
+                    )
+                    all_sequences.append(seq.cpu())
+                    del seq
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                
+                temperature_rewards = None
+                effective_G = self.G
+        
+        return all_sequences, temperature_rewards, effective_G
+    
+    def pad_sequences_list(
+        self,
+        sequences_list: List[torch.Tensor],
+        device: torch.device
+    ) -> torch.Tensor:
+        """
+        Pad and concatenate a list of sequences to uniform length.
+        
+        Args:
+            sequences_list: List of sequence tensors (each B, varying_seq_len)
+            device: Target device
+        
+        Returns:
+            padded_sequences: Padded tensor (B * G, max_seq_len)
+        """
+        max_len = max(seq.shape[1] for seq in sequences_list)
+        padded = []
+        
+        for seq in sequences_list:
+            if seq.shape[1] < max_len:
+                padding = torch.full(
+                    (seq.shape[0], max_len - seq.shape[1]),
+                    self.tokenizer.pad_token_id,
+                    dtype=seq.dtype
+                )
+                seq = torch.cat([seq, padding], dim=1)
+            padded.append(seq)
+        
+        return torch.cat(padded, dim=0).to(device)
+    
+    def compute_single_log_probs(
+        self, 
+        model: torch.nn.Module, 
+        seq: torch.Tensor, 
+        input_len: int
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute log probabilities for a single sequence batch.
+        Immediately discards logits to save memory.
+        
+        Args:
+            model: The language model
+            seq: Single sequence batch (B, seq_len)
+            input_len: Length of input (to mask)
+        
+        Returns:
+            token_log_probs: Per-token log probabilities (B, seq_len-1)
+            valid_mask: Mask for valid (non-padding) tokens (B, seq_len-1)
+        """
+        train_attention_mask = (seq != self.tokenizer.pad_token_id).long()
+        
+        labels = seq.clone()
+        labels[:, :input_len] = -100
+        
+        outputs = model(input_ids=seq, attention_mask=train_attention_mask)
+        logits = outputs.logits
+        
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        valid_mask = (shift_labels != -100).float()
+        
+        loss_fct = nn.CrossEntropyLoss(reduction='none')
+        token_nll = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+        token_log_probs = -token_nll.view(seq.shape[0], -1)
+        
+        # Immediately delete large tensors
+        del logits, shift_logits, outputs
+        
+        return token_log_probs, valid_mask, shift_labels
+    
+    def compute_single_kl(
+        self,
+        ref_model: torch.nn.Module,
+        seq: torch.Tensor,
+        token_log_probs: torch.Tensor,
+        shift_labels: torch.Tensor,
+        valid_mask: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute KL divergence for a single sequence batch.
+        
+        Args:
+            ref_model: Reference model
+            seq: Single sequence batch (B, seq_len)
+            token_log_probs: Policy log probs (B, seq_len-1)
+            shift_labels: Shifted labels (B, seq_len-1)
+            valid_mask: Valid token mask (B, seq_len-1)
+        
+        Returns:
+            kl_per_sample: KL divergence per sample (B,)
+        """
+        eps = 1e-8
+        train_attention_mask = (seq != self.tokenizer.pad_token_id).long()
+        
+        with torch.no_grad():
+            ref_outputs = ref_model(input_ids=seq, attention_mask=train_attention_mask)
+            ref_logits = ref_outputs.logits
+            ref_shift_logits = ref_logits[..., :-1, :].contiguous()
+            
+            loss_fct = nn.CrossEntropyLoss(reduction='none')
+            ref_token_nll = loss_fct(ref_shift_logits.view(-1, ref_shift_logits.size(-1)), shift_labels.view(-1))
+            ref_token_log_probs = -ref_token_nll.view(seq.shape[0], -1)
+            
+            kl = token_log_probs - ref_token_log_probs
+            kl_per_sample = (kl * valid_mask).sum(dim=1) / (valid_mask.sum(dim=1) + eps)
+            
+            del ref_logits, ref_shift_logits, ref_outputs
+        
+        return kl_per_sample
     
     def prepare_references(
         self, 
@@ -784,6 +982,7 @@ class GDPOLoss(GDPOBase):
     Optionally supports:
     - Tool rewards (Tool Correctness, Tool Format) - adds 2 objectives
     - Temperature contrastive - adds 1 objective
+    - Sequential mode for memory efficiency
     """
     
     def __call__(
@@ -793,7 +992,7 @@ class GDPOLoss(GDPOBase):
         ref_model: Optional[torch.nn.Module] = None
     ) -> LossResult:
         """
-        Compute GDPO loss.
+        Compute GDPO loss. Automatically selects parallel or sequential mode.
         
         Args:
             model: Policy model
@@ -803,6 +1002,18 @@ class GDPOLoss(GDPOBase):
         Returns:
             LossResult with total_loss, components, and outputs
         """
+        if self.sequential:
+            return self._call_sequential(model, inputs, ref_model)
+        else:
+            return self._call_parallel(model, inputs, ref_model)
+    
+    def _call_parallel(
+        self, 
+        model: torch.nn.Module, 
+        inputs: Dict[str, torch.Tensor], 
+        ref_model: Optional[torch.nn.Module] = None
+    ) -> LossResult:
+        """Parallel mode: Generate all samples at once (faster, more memory)."""
         if ref_model is None:
             ref_model = self.ref_model
         
@@ -893,6 +1104,173 @@ class GDPOLoss(GDPOBase):
             torch.cuda.empty_cache()
         
         return LossResult(total_loss=total_loss, components=components, outputs=outputs)
+    
+    def _call_sequential(
+        self, 
+        model: torch.nn.Module, 
+        inputs: Dict[str, torch.Tensor], 
+        ref_model: Optional[torch.nn.Module] = None
+    ) -> LossResult:
+        """Sequential mode: Generate samples one at a time (slower, less memory)."""
+        if ref_model is None:
+            ref_model = self.ref_model
+        
+        input_ids = inputs["input_ids"]
+        attention_mask = inputs["attention_mask"]
+        B = input_ids.shape[0]
+        device = input_ids.device
+        
+        # 1. Generate samples sequentially (stored on CPU)
+        sequences_list, temp_rewards, effective_G = self.generate_samples_sequential(
+            model, input_ids, attention_mask
+        )
+        
+        # 2. Prepare references and GT tool calls
+        expanded_refs = self.prepare_references(inputs, effective_G)
+        expanded_gt_tools = self.prepare_gt_tool_calls(inputs, effective_G)
+        
+        # 3. Determine num_objectives
+        n = 3
+        has_tool_reward = expanded_gt_tools is not None
+        if has_tool_reward:
+            n += 2
+        if temp_rewards is not None:
+            n += 1
+        
+        # 4. Compute rewards sequentially
+        reward_config = self.build_reward_config()
+        all_rewards = []
+        
+        for i, seq_cpu in enumerate(sequences_list):
+            seq_gpu = seq_cpu.to(device)
+            # Compute reward for single sample
+            batch_temp_rewards = None
+            if temp_rewards is not None:
+                start_idx = i * B
+                end_idx = (i + 1) * B
+                batch_temp_rewards = temp_rewards[start_idx:end_idx]
+            
+            batch_gt_tools = None
+            if expanded_gt_tools is not None:
+                start_idx = i * B
+                end_idx = (i + 1) * B
+                batch_gt_tools = expanded_gt_tools[start_idx:end_idx]
+            
+            batch_refs = None
+            if expanded_refs is not None:
+                start_idx = i * B
+                end_idx = (i + 1) * B
+                batch_refs = expanded_refs[start_idx:end_idx]
+            
+            reward = compute_rewards(
+                seq_gpu, self.tokenizer,
+                references=batch_refs,
+                reward_config=reward_config,
+                token_config=Ministral3TokenConfig,
+                num_objectives=n,
+                temperature_rewards=batch_temp_rewards,
+                gt_tool_calls=batch_gt_tools
+            )
+            all_rewards.append(reward.cpu())
+            del seq_gpu
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        # Stack rewards and compute advantages
+        rewards_flat = torch.cat(all_rewards, dim=0).to(device)
+        rewards = rewards_flat.view(B, effective_G, n)
+        
+        weights = self.get_reward_weights(n, has_uncertainty=False, has_tool_reward=has_tool_reward)
+        final_advantages_flat = self.compute_advantages(rewards, weights, device)
+        
+        # 5. Forward pass sequentially with gradient accumulation
+        input_len = input_ids.shape[1]
+        total_pg_loss = torch.tensor(0.0, device=device, requires_grad=True)
+        total_kl = torch.tensor(0.0, device=device)
+        
+        # Pad sequences to uniform length for proper indexing
+        sequences = self.pad_sequences_list(sequences_list, device)
+        
+        all_log_probs = []
+        all_valid_masks = []
+        all_shift_labels = []
+        
+        for i, seq_cpu in enumerate(sequences_list):
+            seq_gpu = seq_cpu.to(device)
+            
+            # Pad to match max length
+            max_len = sequences.shape[1]
+            if seq_gpu.shape[1] < max_len:
+                padding = torch.full(
+                    (seq_gpu.shape[0], max_len - seq_gpu.shape[1]),
+                    self.tokenizer.pad_token_id,
+                    dtype=seq_gpu.dtype,
+                    device=device
+                )
+                seq_gpu = torch.cat([seq_gpu, padding], dim=1)
+            
+            token_log_probs, valid_mask, shift_labels = self.compute_single_log_probs(
+                model, seq_gpu, input_len
+            )
+            all_log_probs.append(token_log_probs)
+            all_valid_masks.append(valid_mask)
+            all_shift_labels.append(shift_labels)
+            
+            # KL penalty per sample
+            if ref_model is not None:
+                kl_per_sample = self.compute_single_kl(
+                    ref_model, seq_gpu, token_log_probs, shift_labels, valid_mask
+                )
+                total_kl = total_kl + kl_per_sample.sum()
+            
+            del seq_gpu
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        # Stack and compute policy gradient
+        token_log_probs = torch.cat(all_log_probs, dim=0)
+        valid_mask = torch.cat(all_valid_masks, dim=0)
+        
+        seq_log_prob = (token_log_probs * valid_mask).sum(dim=1)
+        pg_loss = -(final_advantages_flat.detach() * seq_log_prob).mean()
+        
+        # KL penalty
+        eps = 1e-8
+        total_samples = B * effective_G
+        kl_penalty = self.kl_coef * total_kl / (total_samples + eps) if ref_model else 0.0
+        
+        total_loss = pg_loss + kl_penalty
+        
+        # Logging
+        reward_means = rewards.mean(dim=(0, 1))
+        kl_penalty_val = kl_penalty.item() if isinstance(kl_penalty, torch.Tensor) else kl_penalty
+        
+        components = {
+            "pg_loss": pg_loss.item(),
+            "kl_penalty": kl_penalty_val,
+            "reward_format": reward_means[0].item(),
+            "reward_length": reward_means[1].item(),
+            "reward_accuracy": reward_means[2].item(),
+            "advantage_mean": final_advantages_flat.mean().item(),
+            "advantage_std": final_advantages_flat.std().item(),
+        }
+        
+        next_idx = 3
+        if has_tool_reward:
+            components["reward_tool_correctness"] = reward_means[next_idx].item()
+            components["reward_tool_format"] = reward_means[next_idx + 1].item()
+            next_idx += 2
+        
+        if temp_rewards is not None:
+            components["reward_temperature"] = reward_means[next_idx].item()
+        
+        # Memory cleanup
+        del sequences_list, sequences, rewards_flat, rewards
+        del all_log_probs, all_valid_masks, all_shift_labels
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        return LossResult(total_loss=total_loss, components=components, outputs=None)
 
 
 class HeteroscedasticGDPOLoss(GDPOBase):
@@ -989,7 +1367,7 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         ref_model: Optional[torch.nn.Module] = None
     ) -> LossResult:
         """
-        Compute Heteroscedastic GDPO loss with uncertainty reward.
+        Compute Heteroscedastic GDPO loss. Automatically selects parallel or sequential mode.
         
         Args:
             model: Policy model
@@ -999,6 +1377,18 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         Returns:
             LossResult with total_loss, components, and outputs
         """
+        if self.sequential:
+            return self._call_sequential(model, inputs, ref_model)
+        else:
+            return self._call_parallel(model, inputs, ref_model)
+    
+    def _call_parallel(
+        self, 
+        model: torch.nn.Module, 
+        inputs: Dict[str, torch.Tensor], 
+        ref_model: Optional[torch.nn.Module] = None
+    ) -> LossResult:
+        """Parallel mode: Generate all samples at once (faster, more memory)."""
         if ref_model is None:
             ref_model = self.ref_model
         
@@ -1108,6 +1498,218 @@ class HeteroscedasticGDPOLoss(GDPOBase):
             torch.cuda.empty_cache()
         
         return LossResult(total_loss=total_loss, components=components, outputs=outputs)
+    
+    def _call_sequential(
+        self, 
+        model: torch.nn.Module, 
+        inputs: Dict[str, torch.Tensor], 
+        ref_model: Optional[torch.nn.Module] = None
+    ) -> LossResult:
+        """Sequential mode: Generate samples one at a time (slower, less memory)."""
+        if ref_model is None:
+            ref_model = self.ref_model
+        
+        input_ids = inputs["input_ids"]
+        attention_mask = inputs["attention_mask"]
+        B = input_ids.shape[0]
+        device = input_ids.device
+        
+        # 1. Generate samples sequentially (stored on CPU)
+        sequences_list, temp_rewards, effective_G = self.generate_samples_sequential(
+            model, input_ids, attention_mask
+        )
+        
+        # 2. Prepare references and GT tool calls
+        expanded_refs = self.prepare_references(inputs, effective_G)
+        expanded_gt_tools = self.prepare_gt_tool_calls(inputs, effective_G)
+        
+        # 2.5. Compute max_len and create padded sequences for consistent tensor sizes
+        max_len = max(seq.shape[1] for seq in sequences_list)
+        padded_sequences_list = []
+        for seq_cpu in sequences_list:
+            if seq_cpu.shape[1] < max_len:
+                padding = torch.full(
+                    (seq_cpu.shape[0], max_len - seq_cpu.shape[1]),
+                    self.tokenizer.pad_token_id,
+                    dtype=seq_cpu.dtype
+                )
+                padded_seq = torch.cat([seq_cpu, padding], dim=1)
+            else:
+                padded_seq = seq_cpu
+            padded_sequences_list.append(padded_seq)
+        
+        # 3. Forward pass sequentially to compute uncertainty and log probs
+        input_len = input_ids.shape[1]
+        all_log_probs = []
+        all_valid_masks = []
+        all_shift_labels = []
+        all_sigma = []
+        all_uncertainty = []
+        
+        for i, seq_cpu in enumerate(padded_sequences_list):
+            seq_gpu = seq_cpu.to(device)
+            
+            # Compute log probs and get shift_logits for uncertainty
+            train_attention_mask = (seq_gpu != self.tokenizer.pad_token_id).long()
+            labels = seq_gpu.clone()
+            labels[:, :input_len] = -100
+            
+            outputs = model(input_ids=seq_gpu, attention_mask=train_attention_mask)
+            logits = outputs.logits
+            
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            valid_mask = (shift_labels != -100).float()
+            
+            loss_fct = nn.CrossEntropyLoss(reduction='none')
+            token_nll = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            token_log_probs = -token_nll.view(seq_gpu.shape[0], -1)
+            
+            # Compute uncertainty for this batch
+            if self.uncertainty_full_sequence:
+                sigma, uncertainty = self.compute_uncertainty(shift_logits, valid_mask)
+            else:
+                reasoning_mask = self.get_reasoning_mask(seq_gpu)
+                sigma, uncertainty = self.compute_uncertainty(shift_logits, valid_mask, reasoning_mask)
+            
+            all_log_probs.append(token_log_probs.cpu())
+            all_valid_masks.append(valid_mask.cpu())
+            all_shift_labels.append(shift_labels.cpu())
+            all_sigma.append(sigma.cpu())
+            all_uncertainty.append(uncertainty.cpu())
+            
+            del seq_gpu, logits, shift_logits, outputs
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        # Stack uncertainty scores
+        uncertainty_scores = torch.cat(all_uncertainty, dim=0).to(device)
+        sigma_per_sample = torch.cat(all_sigma, dim=0).to(device)
+        
+        # 4. Determine num_objectives
+        n = 4  # Format, Length, Accuracy, Uncertainty
+        has_tool_reward = expanded_gt_tools is not None
+        if has_tool_reward:
+            n += 2
+        if temp_rewards is not None:
+            n += 1
+        
+        # 5. Compute rewards sequentially
+        reward_config = self.build_reward_config()
+        reward_config["uncertainty_threshold"] = self.uncertainty_threshold
+        all_rewards = []
+        
+        for i, seq_cpu in enumerate(padded_sequences_list):
+            seq_gpu = seq_cpu.to(device)
+            
+            # Get corresponding uncertainty scores
+            start_idx = i * B
+            end_idx = (i + 1) * B
+            batch_uncertainty = uncertainty_scores[start_idx:end_idx].detach().cpu()
+            
+            batch_temp_rewards = None
+            if temp_rewards is not None:
+                batch_temp_rewards = temp_rewards[start_idx:end_idx]
+            
+            batch_gt_tools = None
+            if expanded_gt_tools is not None:
+                batch_gt_tools = expanded_gt_tools[start_idx:end_idx]
+            
+            batch_refs = None
+            if expanded_refs is not None:
+                batch_refs = expanded_refs[start_idx:end_idx]
+            
+            reward = compute_rewards(
+                seq_gpu, self.tokenizer,
+                references=batch_refs,
+                reward_config=reward_config,
+                token_config=Ministral3TokenConfig,
+                num_objectives=n,
+                uncertainty_scores=batch_uncertainty,
+                temperature_rewards=batch_temp_rewards,
+                gt_tool_calls=batch_gt_tools
+            )
+            all_rewards.append(reward.cpu())
+            del seq_gpu
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        # Stack rewards and compute advantages
+        rewards_flat = torch.cat(all_rewards, dim=0).to(device)
+        rewards = rewards_flat.view(B, effective_G, n)
+        
+        weights = self.get_reward_weights(n, has_uncertainty=True, has_tool_reward=has_tool_reward)
+        final_advantages_flat = self.compute_advantages(rewards, weights, device)
+        
+        # 6. Compute KL sequentially
+        total_kl = torch.tensor(0.0, device=device)
+        
+        if ref_model is not None:
+            for i, seq_cpu in enumerate(padded_sequences_list):
+                seq_gpu = seq_cpu.to(device)
+                token_log_probs = all_log_probs[i].to(device)
+                shift_labels = all_shift_labels[i].to(device)
+                valid_mask = all_valid_masks[i].to(device)
+                
+                kl_per_sample = self.compute_single_kl(
+                    ref_model, seq_gpu, token_log_probs, shift_labels, valid_mask
+                )
+                total_kl = total_kl + kl_per_sample.sum()
+                
+                del seq_gpu
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+        
+        # 7. Compute policy gradient
+        token_log_probs = torch.cat([lp.to(device) for lp in all_log_probs], dim=0)
+        valid_mask = torch.cat([vm.to(device) for vm in all_valid_masks], dim=0)
+        
+        seq_log_prob = (token_log_probs * valid_mask).sum(dim=1)
+        pg_loss = -(final_advantages_flat.detach() * seq_log_prob).mean()
+        
+        # KL penalty
+        eps = 1e-8
+        total_samples = B * effective_G
+        kl_penalty = self.kl_coef * total_kl / (total_samples + eps) if ref_model else 0.0
+        
+        total_loss = pg_loss + kl_penalty
+        
+        # Logging
+        reward_means = rewards.mean(dim=(0, 1))
+        kl_penalty_val = kl_penalty.item() if isinstance(kl_penalty, torch.Tensor) else kl_penalty
+        
+        components = {
+            "pg_loss": pg_loss.item(),
+            "kl_penalty": kl_penalty_val,
+            "reward_format": reward_means[0].item(),
+            "reward_length": reward_means[1].item(),
+            "reward_accuracy": reward_means[2].item(),
+            "reward_uncertainty": reward_means[3].item(),
+            "uncertainty_mean": uncertainty_scores.mean().item(),
+            "uncertainty_std": uncertainty_scores.std().item(),
+            "sigma_mean": sigma_per_sample.mean().item(),
+            "sigma_std": sigma_per_sample.std().item(),
+            "advantage_mean": final_advantages_flat.mean().item(),
+            "advantage_std": final_advantages_flat.std().item(),
+        }
+        
+        next_idx = 4
+        if has_tool_reward:
+            components["reward_tool_correctness"] = reward_means[next_idx].item()
+            components["reward_tool_format"] = reward_means[next_idx + 1].item()
+            next_idx += 2
+        
+        if temp_rewards is not None:
+            components["reward_temperature"] = reward_means[next_idx].item()
+        
+        # Memory cleanup
+        del sequences_list, padded_sequences_list, rewards_flat, rewards
+        del all_log_probs, all_valid_masks, all_shift_labels
+        del all_sigma, all_uncertainty, uncertainty_scores, sigma_per_sample
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        return LossResult(total_loss=total_loss, components=components, outputs=None)
 
 
 # =============================================================================

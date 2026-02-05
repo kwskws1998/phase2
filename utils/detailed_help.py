@@ -247,30 +247,25 @@ Behavior:
   Easy rewards (Format, Length) are conditioned on difficult rewards.
   Easy rewards are only given when ALL difficult conditions are met.
 
-  Difficult rewards and conditions:
-  1. Accuracy >= condition_threshold (always checked)
-  2. Uncertainty < uncertainty_threshold (only when heteroscedastic_gdpo)
-
-  AND Logic (both must be satisfied):
-  | Accuracy | Uncertainty | Easy Rewards |
-  |----------|-------------|--------------|
-  | High     | Low         | Given        |
-  | High     | High        | NOT Given    |
-  | Low      | Low         | NOT Given    |
-  | Low      | High        | NOT Given    |
+  4-Level Hierarchy (when tool rewards enabled):
+  1. Uncertainty (hardest): If fail, all lower rewards are zeroed
+  2. Accuracy: If fail, Tool Correctness and Easy rewards are zeroed
+  3. Tool Correctness: If fail, Easy rewards are zeroed
+  4. Easy rewards (Format, Length, Tool Format): Granted only if all above pass
 
   For standard GDPO (without uncertainty), only accuracy is checked.
 
 Related:
-  --gdpo_condition_threshold: Accuracy threshold
+  --gdpo_accuracy_threshold: Accuracy threshold
   --gdpo_uncertainty_threshold: Uncertainty threshold
+  --gdpo_tool_correctness_threshold: Tool correctness threshold
 """,
 
-    "gdpo_condition_threshold": """--gdpo_condition_threshold: Accuracy threshold for conditioned rewards
+    "gdpo_accuracy_threshold": """--gdpo_accuracy_threshold: Accuracy threshold for conditioned rewards
 
 Usage:
-  --gdpo_condition_threshold 1.0    Default (requires perfect accuracy)
-  --gdpo_condition_threshold 0.5    More lenient
+  --gdpo_accuracy_threshold 1.0    Default (binary: 1=correct, 0=incorrect)
+  --gdpo_accuracy_threshold 0.5    More lenient
 
 When --gdpo_use_conditioned_rewards is enabled, easy rewards (Format, Length)
 are only given if accuracy meets or exceeds this threshold.
@@ -403,6 +398,65 @@ Usage:
   --gdpo_reward_weight_uncertainty 2.0    Increase uncertainty effect
 
 Weight for uncertainty reward in advantage calculation for heteroscedastic_gdpo
+""",
+
+    # ===================
+    # GDPO Memory & Additional Options
+    # ===================
+    "gdpo_sequential": """--gdpo_sequential: Enable sequential processing for memory optimization
+
+Usage:
+  --gdpo_sequential
+
+Behavior:
+  - Default (parallel): Generate all G samples at once (fast, high memory)
+  - Sequential: Generate samples one at a time, store on CPU (slow, low memory)
+
+Memory comparison (B=2, G=4, seq_len=2048):
+  - Parallel: ~8.5GB peak GPU memory
+  - Sequential: ~1.1GB peak GPU memory
+
+Use when encountering OOM errors during GDPO training.
+""",
+
+    "gdpo_tool_correctness_threshold": """--gdpo_tool_correctness_threshold: Tool correctness threshold
+
+Usage:
+  --gdpo_tool_correctness_threshold 1.5    Default (~75% match required)
+  --gdpo_tool_correctness_threshold 2.0    More lenient
+  --gdpo_tool_correctness_threshold 1.0    Stricter
+
+Tool correctness score range: -3 to +3
+Threshold determines when tool rewards are conditioned in hierarchical system.
+
+Hierarchy:
+  1. Uncertainty (hardest)
+  2. Accuracy
+  3. Tool Correctness <- this threshold
+  4. Easy rewards (Format, Length, Tool Format)
+""",
+
+    "gdpo_uncertainty_full_sequence": """--gdpo_uncertainty_full_sequence: Measure uncertainty on full sequence
+
+Usage:
+  --gdpo_uncertainty_full_sequence
+
+Behavior:
+  - Default (disabled): Measure uncertainty only in [THINK]...[/THINK] section
+  - Enabled: Measure uncertainty across the entire generated sequence
+
+Reasoning-only is recommended for most cases as it focuses on the
+model's reasoning process rather than output formatting.
+""",
+
+    "gdpo_target_length": """--gdpo_target_length: Target length for length penalty
+
+Usage:
+  --gdpo_target_length 1024    Default
+  --gdpo_target_length 512     Prefer shorter responses
+  --gdpo_target_length 2048    Prefer longer responses
+
+Length reward penalizes deviation from target length.
 """,
 }
 
