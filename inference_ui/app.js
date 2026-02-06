@@ -3426,7 +3426,8 @@ function openDetailPanel(planData) {
     
     // Show panel
     detailPanel.style.display = 'flex';
-    detailPanel.style.setProperty('--detail-panel-width', detailPanelWidth + 'px');
+    // Set CSS variable on :root for consistent usage across toggle and panel
+    document.documentElement.style.setProperty('--detail-panel-width', detailPanelWidth + 'px');
     
     if (detailResizeHandle) {
         detailResizeHandle.style.display = 'block';
@@ -3550,6 +3551,10 @@ function setupDetailResize() {
         startX = e.clientX;
         startWidth = detailPanel.offsetWidth;
         detailResizeHandle.classList.add('resizing');
+        // Add resizing class to toggle to disable transition
+        if (detailToggle) {
+            detailToggle.classList.add('resizing');
+        }
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
     });
@@ -3561,10 +3566,11 @@ function setupDetailResize() {
         const newWidth = Math.max(250, Math.min(startWidth + diff, window.innerWidth * 0.6));
         
         detailPanelWidth = newWidth;
-        detailPanel.style.setProperty('--detail-panel-width', newWidth + 'px');
+        // Update CSS variable on :root for consistent usage
+        document.documentElement.style.setProperty('--detail-panel-width', newWidth + 'px');
         detailPanel.style.width = newWidth + 'px';
         
-        // Sync toggle button position
+        // Sync toggle button position (no transition during resize)
         if (detailToggle && detailPanelOpen) {
             detailToggle.style.right = (newWidth + 4) + 'px';
         }
@@ -3574,6 +3580,14 @@ function setupDetailResize() {
         if (isResizing) {
             isResizing = false;
             detailResizeHandle.classList.remove('resizing');
+            // Remove resizing class from toggle
+            if (detailToggle) {
+                detailToggle.classList.remove('resizing');
+                // Clear inline style, let CSS handle via variable
+                detailToggle.style.right = '';
+            }
+            // Clear inline width, let CSS handle via variable
+            detailPanel.style.width = '';
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
         }

@@ -3222,6 +3222,11 @@ body,
     transform: rotate(180deg);
 }
 
+/* Disable transition during resize for instant positioning */
+.detail-toggle.resizing {
+    transition: none !important;
+}
+
 /* Resize Handle */
 .detail-resize-handle {
     width: 4px;

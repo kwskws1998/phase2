@@ -5,12 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inference Chat</title>
     <link rel="stylesheet" href="style.css">
-    <!-- KaTeX for LaTeX rendering -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
-    <!-- Marked.js for Markdown rendering -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- KaTeX for LaTeX rendering (local with CDN fallback) -->
+    <link rel="stylesheet" href="lib/katex/katex.min.css" id="katexCss">
+    <script>
+        document.getElementById('katexCss').onerror = function() {
+            this.onerror = null;
+            this.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css';
+        };
+    </script>
+    <script defer src="lib/katex/katex.min.js"
+            onerror="this.onerror=null; this.src='https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js'"></script>
+    <script defer src="lib/katex/contrib/auto-render.min.js"
+            onerror="this.onerror=null; this.src='https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js'"></script>
+    <!-- Marked.js for Markdown rendering (local with CDN fallback) -->
+    <script src="lib/marked/marked.min.js"
+            onerror="this.onerror=null; this.src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'"></script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
 </head>
 <body>
