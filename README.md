@@ -73,9 +73,35 @@ source .venv/bin/activate
 ### Training Commands
 
 **Stage 1: SFT**
+
+Basic SFT with Cross-Entropy:
 ```bash
 python training.py --model_type ministral_3_3b_instruct --data_path data/train.json --loss_type cross_entropy --epochs 3 --freeze_until_layer 24
 ```
+
+SFT with Learned Uncertainty (Kendall & Gal, 2017):
+```bash
+python training.py --model_type ministral_3_3b_instruct --data_path data/train.json --loss_type heteroscedastic_uncertainty --epochs 3 --freeze_until_layer 24
+```
+
+**Heteroscedastic Uncertainty Loss:**
+
+The model learns per-token uncertainty σ alongside predictions. The loss uses Monte Carlo sampling:
+
+```
+x̂_t = f + σ · ε_t,  where ε_t ~ N(0, I)
+
+L = -log( (1/T) · Σ_t softmax(x̂_t)[c] )
+```
+
+Where:
+- `f`: logits (model output)
+- `σ = exp(log_variance / 2)`: learned standard deviation
+- `ε_t`: random noise sampled from standard normal distribution
+- `T`: number of Monte Carlo samples (default: 3)
+- `c`: ground truth token index
+
+This enables the model to express confidence in its predictions by learning input-dependent uncertainty.
 
 **Stage 2: GDPO** (continue from SFT model)
 ```bash
