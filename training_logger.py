@@ -4,12 +4,15 @@ Training CSV Logger - Module for logging training results to CSV
 LossResult: Loss function return format
 TrainingLogger: CSV logging management
 CSVLoggingCallback: Integration with Trainer
+TokenErrorTracker: Token-level error tracking for validation
 """
 import os
+import gc
 import pandas as pd
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
+from collections import Counter
 import torch
 from transformers import TrainerCallback
 from utils.paths import get_result_dir
@@ -163,7 +166,7 @@ class CSVLoggingCallback(TrainerCallback):
     Trainer Callback to synchronize CSV saving with model checkpoint.
     
     - on_save: Save CSV when checkpoint is saved
-    - on_train_end: Final save when training ends
+    - on_train_end: Final save when training ends + generate figures
     """
     
     def __init__(self, logger: TrainingLogger):
@@ -179,6 +182,189 @@ class CSVLoggingCallback(TrainerCallback):
         return control
     
     def on_train_end(self, args, state, control, **kwargs):
-        """Final save when training ends"""
+        """Final save when training ends + generate figures"""
         self.logger.save()
+        
+        # Generate visualization figures
+        try:
+            from visualization import generate_training_figures
+            generate_training_figures(self.logger.records, self.logger.output_path)
+        except ImportError as e:
+            print(f"[CSVLoggingCallback] Warning: Could not import visualization module: {e}")
+        except Exception as e:
+            print(f"[CSVLoggingCallback] Warning: Figure generation failed: {e}")
+        
+        # Force garbage collection to free memory after visualization
+        gc.collect()
+        
         return control
+
+
+class EvalAccuracyCallback(TrainerCallback):
+    """
+    Callback to log epoch-level accuracy from TokenErrorTracker.
+    
+    - on_evaluate: Get accuracy from tracker, log to records, reset epoch counters
+    """
+    
+    def __init__(self, trainer_ref, logger: TrainingLogger):
+        """
+        Args:
+            trainer_ref: Reference to the CustomTrainer (to access token_error_tracker)
+            logger: TrainingLogger instance (to log eval_accuracy)
+        """
+        self.trainer_ref = trainer_ref
+        self.logger = logger
+    
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+        """Log epoch accuracy, eval_loss, and reset epoch counters."""
+        trainer = self.trainer_ref
+        epoch = int(state.epoch) if state.epoch else 0
+        
+        # Capture eval_loss from HuggingFace metrics
+        if metrics and 'eval_loss' in metrics:
+            self.logger.log(
+                step=state.global_step,
+                epoch=epoch,
+                eval_loss=metrics['eval_loss']
+            )
+        
+        if hasattr(trainer, 'token_error_tracker'):
+            accuracy = trainer.token_error_tracker.get_epoch_accuracy()
+            
+            # Log eval_accuracy to records for visualization
+            self.logger.log(
+                step=state.global_step,
+                epoch=epoch,
+                eval_accuracy=accuracy
+            )
+            
+            # Reset epoch counters for next evaluation
+            trainer.token_error_tracker.reset_epoch()
+            
+            print(f"[EvalAccuracyCallback] Epoch {epoch} - Val Loss: {metrics.get('eval_loss', 'N/A'):.4f}, Val Accuracy: {accuracy:.2f}%")
+        
+        return control
+
+
+class TokenErrorTracker:
+    """
+    Tracks token-level prediction errors during validation.
+    Excludes only pad tokens from tracking.
+    
+    Supports dual tracking:
+    - Cumulative: For final error analysis (token_errors.csv)
+    - Per-epoch: For visualization (accuracy plots)
+    """
+    
+    def __init__(self, pad_token_id=None):
+        """
+        Args:
+            pad_token_id: Token ID for padding (will be excluded from tracking)
+        """
+        # Cumulative counters (entire training)
+        self.error_counts = Counter()  # (predicted_id, label_id) -> count
+        self.total_tokens = 0
+        self.correct_tokens = 0
+        self.pad_token_id = pad_token_id
+        
+        # Per-epoch counters (reset each epoch)
+        self.epoch_total = 0
+        self.epoch_correct = 0
+    
+    def update(self, predicted_ids, label_ids, mask):
+        """
+        Update error counts from a batch.
+        
+        Args:
+            predicted_ids: (batch, seq_len) - argmax of logits
+            label_ids: (batch, seq_len) - ground truth
+            mask: (batch, seq_len) - valid positions (label != -100)
+        """
+        pred_flat = predicted_ids[mask].cpu().tolist()
+        label_flat = label_ids[mask].cpu().tolist()
+        
+        for pred, label in zip(pred_flat, label_flat):
+            # Skip pad tokens only
+            if self.pad_token_id is not None and label == self.pad_token_id:
+                continue
+            
+            # Update cumulative counters
+            self.total_tokens += 1
+            # Update per-epoch counters
+            self.epoch_total += 1
+            
+            if pred == label:
+                self.correct_tokens += 1
+                self.epoch_correct += 1
+            else:
+                self.error_counts[(pred, label)] += 1
+    
+    def get_epoch_accuracy(self) -> float:
+        """
+        Get accuracy for the current epoch.
+        
+        Returns:
+            Accuracy as percentage (0-100)
+        """
+        if self.epoch_total == 0:
+            return 0.0
+        return self.epoch_correct / self.epoch_total * 100
+    
+    def reset_epoch(self):
+        """
+        Reset per-epoch counters.
+        Called after each evaluation epoch.
+        Cumulative counters are preserved for final error analysis.
+        """
+        self.epoch_total = 0
+        self.epoch_correct = 0
+    
+    def save_csv(self, output_path, tokenizer, top_k=100):
+        """
+        Save top-k errors to CSV with summary statistics at the end.
+        
+        Args:
+            output_path: Path to save the CSV file
+            tokenizer: Tokenizer for decoding token IDs
+            top_k: Number of top errors to save (default: 100)
+        """
+        accuracy = self.correct_tokens / self.total_tokens * 100 if self.total_tokens > 0 else 0
+        total_errors = self.total_tokens - self.correct_tokens
+        
+        # Error records
+        records = []
+        for (pred_id, label_id), count in self.error_counts.most_common(top_k):
+            pred_token = tokenizer.decode([pred_id])
+            label_token = tokenizer.decode([label_id])
+            error_rate = count / self.total_tokens * 100
+            records.append({
+                "rank": len(records) + 1,
+                "predicted_token": repr(pred_token),
+                "label_token": repr(label_token),
+                "count": count,
+                "error_rate": f"{error_rate:.2f}%"
+            })
+        
+        # Add empty row as separator
+        records.append({
+            "rank": "",
+            "predicted_token": "",
+            "label_token": "",
+            "count": "",
+            "error_rate": ""
+        })
+        
+        # Add summary statistics at the end
+        records.append({
+            "rank": "SUMMARY",
+            "predicted_token": f"total_tokens: {self.total_tokens}",
+            "label_token": f"correct: {self.correct_tokens}",
+            "count": f"errors: {total_errors}",
+            "error_rate": f"accuracy: {accuracy:.2f}%"
+        })
+        
+        df = pd.DataFrame(records)
+        df.to_csv(output_path, index=False, encoding='utf-8-sig')
+        print(f"[TokenErrorTracker] Saved {len(records)-2} error types to {output_path}")
+        print(f"[TokenErrorTracker] Accuracy: {accuracy:.2f}% ({self.correct_tokens}/{self.total_tokens})")

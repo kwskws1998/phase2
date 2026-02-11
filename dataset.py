@@ -1,7 +1,8 @@
 import json
 import os
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Subset
+from sklearn.model_selection import train_test_split
 from utils import get_file_config
 
 
@@ -46,6 +47,9 @@ class JsonDataset(Dataset):
         if file_path and isinstance(file_path, str):
             with open(file_path, "r", encoding="utf-8") as f:
                 self.data = json.load(f)
+        
+        # Store raw data for stratified split access
+        self.raw_data = self.data
         
     def __len__(self):
         return len(self.data)
@@ -153,14 +157,48 @@ class JsonDataset(Dataset):
 def get_dataset(args, tokenizer):
     """
     Factory function to return a dataset.
+    
+    Returns:
+        tuple: (train_dataset, eval_dataset) - eval_dataset is None if val_ratio=0
     """
     model_type = getattr(args, 'model_type', 'ministral_3_3b_instruct')
+    val_ratio = getattr(args, 'val_ratio', 0.3)
+    stratify_key = getattr(args, 'stratify', None)
+    
     if args.data_path:
         print(f"Loading custom JsonDataset from {args.data_path}")
-        return JsonDataset(args.data_path, tokenizer, model_type=model_type)
+        full_dataset = JsonDataset(args.data_path, tokenizer, model_type=model_type)
+        
+        if val_ratio > 0:
+            indices = list(range(len(full_dataset)))
+            
+            # Prepare stratify parameter
+            stratify_labels = None
+            if stratify_key and hasattr(full_dataset, 'raw_data'):
+                stratify_labels = [item.get(stratify_key, "unknown") 
+                                   for item in full_dataset.raw_data]
+            
+            # Use sklearn train_test_split
+            train_indices, val_indices = train_test_split(
+                indices,
+                test_size=val_ratio,
+                random_state=42,
+                stratify=stratify_labels  # None means random split
+            )
+            
+            train_dataset = Subset(full_dataset, train_indices)
+            eval_dataset = Subset(full_dataset, val_indices)
+            
+            split_type = f"stratified by '{stratify_key}'" if stratify_key else "random"
+            print(f"[Dataset] {split_type} split: train={len(train_indices)}, val={len(val_indices)}")
+            
+            return train_dataset, eval_dataset
+        else:
+            print(f"[Dataset] No validation split (val_ratio=0)")
+            return full_dataset, None
     else:
         # Fallback to dummy if no path provided
-        return DummyDataset(tokenizer)
+        return DummyDataset(tokenizer), None
 
 
 class DummyDataset(Dataset):

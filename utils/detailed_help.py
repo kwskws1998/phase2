@@ -154,9 +154,17 @@ Available:
     - Standard Cross Entropy Loss
     - Basic language model training
 
-  heteroscedastic_cross_entropy
-    - Includes uncertainty learning (Kendall & Gal, 2017)
-    - Model learns its own uncertainty
+  non_learnable_heteroscedastic_uncertainty
+    - Heteroscedastic uncertainty (Kendall & Gal, 2017)
+    - σ = logits.std() (computed from logits, not learned)
+    - Works with any standard model architecture
+    - Good for exploring uncertainty without special model heads
+
+  heteroscedastic_uncertainty
+    - Learned heteroscedastic uncertainty (Kendall & Gal, 2017)
+    - σ = exp(log_variance / 2) (model learns log_variance)
+    - Requires special architecture with variance prediction head
+    - More expressive uncertainty modeling
 
   gdpo
     - Group reward-Decoupled Policy Optimization
@@ -171,6 +179,8 @@ Available:
 
 Usage:
   --loss_type cross_entropy
+  --loss_type non_learnable_heteroscedastic_uncertainty
+  --loss_type heteroscedastic_uncertainty
   --loss_type gdpo
   --loss_type heteroscedastic_gdpo
   --loss_type heteroscedastic_gdpo --gdpo_use_temperature_contrastive

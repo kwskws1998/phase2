@@ -4,6 +4,7 @@ Must be imported before torch to set CUDA_VISIBLE_DEVICES.
 """
 import argparse
 import os
+import sys
 
 
 def configure_gpu():
@@ -16,8 +17,12 @@ def configure_gpu():
     - Server mode (default): Use GPUs 6,7 (multi GPU)
     
     Returns:
-        str: GPU IDs string that was set
+        str: GPU IDs string that was set, or None if help was requested
     """
+    # Skip GPU configuration for help (standard and per-argument help)
+    if "-h" in sys.argv or "--help" in sys.argv:
+        return None
+    
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--gpu", type=str, default=None)

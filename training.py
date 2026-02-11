@@ -1,147 +1,214 @@
+"""
+Training script for fine-tuning language models.
+Supports various loss types including GDPO and heteroscedastic variants.
+
+Note: Heavy imports (torch, transformers, etc.) are deferred to run_training()
+for fast --help response.
+"""
 import argparse
 import os
 import sys
 
-# Early GPU Configuration (MUST be before torch import)
-from utils.gpu_config import configure_gpu
-configure_gpu()
-
-import torch
-import gc
-from transformers import Trainer, TrainingArguments, default_data_collator
-import model as model_module
-from tokenizer import TokenizerManager
-import loss as loss_module
-import dataset as dataset_module
-from training_logger import TrainingLogger, CSVLoggingCallback
-from utils import get_file_config
-from utils.paths import set_local_mode, get_model_dir
-
-def unload_model(obj_list, debug=False):
-    """
-    Explicitly deletes objects and clears CUDA cache.
-    """
-    for obj in obj_list:
-        if obj is not None:
-            # If obj is a Trainer, try to clear its internal references first
-            if hasattr(obj, "model"):
-                try:
-                    obj.model.to("cpu")
-                    del obj.model
-                except:
-                    pass
-            if hasattr(obj, "optimizer"):
-                del obj.optimizer
-            if hasattr(obj, "lr_scheduler"):
-                del obj.lr_scheduler
-                
-            # Move explicit model objects to CPU
-            if hasattr(obj, "to"):
-                try:
-                    obj.to("cpu")
-                except:
-                    pass
-            del obj
-    
-    # Run GC multiple times to catch cyclic references
-    gc.collect()
-    gc.collect()
-    
-    if torch.cuda.is_available():
-        # Clear cache
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
-    
-    if debug:
-        print("[DEBUG] Model and related objects unloaded. Memory cleared.")
-
-def print_memory_stats(step_name):
-    if torch.cuda.is_available():
-        allocated = torch.cuda.memory_allocated() / 1024**3
-        reserved = torch.cuda.memory_reserved() / 1024**3
-        print(f"[{step_name}] VRAM Allocated: {allocated:.2f} GB | Reserved: {reserved:.2f} GB")
-
-class CustomTrainer(Trainer):
-    def __init__(self, loss_type="cross_entropy", logger=None, debug=False, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.loss_handler = loss_module.get_loss_handler(loss_type)
-        self.loss_type = loss_type
-        self.logger = logger
-        self.debug = debug
-        if debug:
-            print(f"[DEBUG] CustomTrainer initialized with loss_type: {self.loss_type}")
-
-    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None, **kwargs):
-        """
-        Overridden compute_loss to delegate to loss handlers.
-        Supports both old and new Transformers signatures.
-        Loss handlers return LossResult.
-        """
-        # Our loss handlers return LossResult
-        loss_result = self.loss_handler(model, inputs, self)
-        
-        # Log to CSV if logger is available
-        if self.logger is not None:
-            # Decode predict and label texts (response portion only)
-            predict_text = None
-            label_text = None
-            
-            # Find response start position from labels (-100 marks prompt)
-            response_start = 0
-            if "labels" in inputs and inputs["labels"] is not None:
-                label_ids = inputs["labels"][0]
-                response_mask = label_ids != -100
-                if response_mask.any():
-                    response_start = response_mask.nonzero()[0].item()
-                
-                # Decode labels (response portion only, already filtered by -100)
-                valid_label_ids = label_ids[response_mask]
-                if len(valid_label_ids) > 0:
-                    label_text = self.processing_class.decode(
-                        valid_label_ids, skip_special_tokens=True
-                    )
-            
-            if loss_result.outputs is not None and hasattr(loss_result.outputs, 'logits'):
-                # Get predicted token IDs (argmax of logits)
-                predicted_ids = loss_result.outputs.logits.argmax(dim=-1)
-                
-                # Get actual sequence length from attention_mask (exclude padding)
-                seq_len = len(predicted_ids[0])
-                if "attention_mask" in inputs and inputs["attention_mask"] is not None:
-                    seq_len = inputs["attention_mask"][0].sum().item()
-                
-                # Decode response portion only (from response_start to seq_len, excluding padding)
-                predict_ids = predicted_ids[0][response_start:seq_len]
-                if len(predict_ids) > 0:
-                    predict_text = self.processing_class.decode(
-                        predict_ids, skip_special_tokens=True
-                    )
-            
-            self.logger.log(
-                step=self.state.global_step,
-                epoch=int(self.state.epoch) + 1 if self.state.epoch is not None else 1,
-                loss_result=loss_result,
-                predict=predict_text,
-                label=label_text
-            )
-        
-        if return_outputs:
-            return (loss_result.total_loss, loss_result.outputs)
-        return loss_result.total_loss
-
-def set_seed(seed, debug=False):
-    """Set random seed for reproducibility."""
-    import random
-    import numpy as np
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    if debug:
-        print(f"[DEBUG] Random seed set to {seed}")
 
 def run_training(args):
+    """Main training function. Heavy imports happen here."""
+    
+    # ==========================================================================
+    # Heavy Imports (deferred for fast --help)
+    # ==========================================================================
+    
+    # GPU Configuration (MUST be before torch import)
+    from utils.gpu_config import configure_gpu
+    configure_gpu()
+    
+    import torch
+    import gc
+    from transformers import Trainer, TrainingArguments, default_data_collator, EarlyStoppingCallback
+    import numpy as np
+    import model as model_module
+    from tokenizer import TokenizerManager
+    import loss as loss_module
+    import dataset as dataset_module
+    from training_logger import TrainingLogger, CSVLoggingCallback, EvalAccuracyCallback
+    from utils import get_file_config, get_token_config
+    from utils.paths import set_local_mode, get_model_dir, get_result_dir
+    
+    # ==========================================================================
+    # Helper Functions (defined here to use imports above)
+    # ==========================================================================
+    
+    def unload_model(obj_list, debug=False):
+        """Explicitly deletes objects and clears CUDA cache."""
+        for obj in obj_list:
+            if obj is not None:
+                if hasattr(obj, "model"):
+                    try:
+                        obj.model.to("cpu")
+                        del obj.model
+                    except:
+                        pass
+                if hasattr(obj, "optimizer"):
+                    del obj.optimizer
+                if hasattr(obj, "lr_scheduler"):
+                    del obj.lr_scheduler
+                if hasattr(obj, "to"):
+                    try:
+                        obj.to("cpu")
+                    except:
+                        pass
+                del obj
+        
+        gc.collect()
+        gc.collect()
+        
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+        
+        if debug:
+            print("[DEBUG] Model and related objects unloaded. Memory cleared.")
+
+    def print_memory_stats(step_name):
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            reserved = torch.cuda.memory_reserved() / 1024**3
+            print(f"[{step_name}] VRAM Allocated: {allocated:.2f} GB | Reserved: {reserved:.2f} GB")
+
+    def set_seed(seed, debug=False):
+        """Set random seed for reproducibility."""
+        import random
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        if debug:
+            print(f"[DEBUG] Random seed set to {seed}")
+
+    # ==========================================================================
+    # CustomTrainer Class
+    # ==========================================================================
+    
+    class CustomTrainer(Trainer):
+        def __init__(self, loss_type="cross_entropy", logger=None, debug=False, 
+                     track_token_errors=False, pad_token_id=None, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.loss_handler = loss_module.get_loss_handler(loss_type)
+            self.loss_type = loss_type
+            self.logger = logger
+            self.debug = debug
+            self.track_token_errors = track_token_errors  # For saving final CSV
+            
+            # Always enable TokenErrorTracker if we have eval_dataset
+            # (for epoch-level accuracy tracking and visualization)
+            has_eval = self.eval_dataset is not None and len(self.eval_dataset) > 0
+            if has_eval or track_token_errors:
+                from training_logger import TokenErrorTracker
+                self.token_error_tracker = TokenErrorTracker(pad_token_id=pad_token_id)
+                if debug:
+                    print("[DEBUG] TokenErrorTracker initialized (eval_dataset detected or track_token_errors=True)")
+            
+            if debug:
+                print(f"[DEBUG] CustomTrainer initialized with loss_type: {self.loss_type}")
+
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None, **kwargs):
+            """Overridden compute_loss to delegate to loss handlers."""
+            loss_result = self.loss_handler(model, inputs, self)
+            
+            if self.logger is not None:
+                predict_text = None
+                label_text = None
+                
+                response_start = 0
+                if "labels" in inputs and inputs["labels"] is not None:
+                    label_ids = inputs["labels"][0]
+                    response_mask = label_ids != -100
+                    if response_mask.any():
+                        response_start = response_mask.nonzero()[0].item()
+                    
+                    valid_label_ids = label_ids[response_mask]
+                    if len(valid_label_ids) > 0:
+                        label_text = self.processing_class.decode(
+                            valid_label_ids, skip_special_tokens=True
+                        )
+                
+                # Calculate train accuracy from logits
+                train_accuracy = None
+                if loss_result.outputs is not None and hasattr(loss_result.outputs, 'logits'):
+                    logits = loss_result.outputs.logits
+                    labels = inputs.get("labels")
+                    
+                    if logits is not None and labels is not None:
+                        # Shift for next-token prediction (logits[i] predicts labels[i+1])
+                        shift_logits = logits[..., :-1, :]
+                        shift_labels = labels[..., 1:]
+                        preds = shift_logits.argmax(dim=-1)
+                        mask = shift_labels != -100
+                        correct = ((preds == shift_labels) & mask).sum().item()
+                        total = mask.sum().item()
+                        train_accuracy = (correct / total * 100) if total > 0 else 0.0
+                    
+                    # Generate predict_text for logging
+                    predicted_ids = logits.argmax(dim=-1)
+                    seq_len = len(predicted_ids[0])
+                    if "attention_mask" in inputs and inputs["attention_mask"] is not None:
+                        seq_len = inputs["attention_mask"][0].sum().item()
+                    
+                    predict_ids = predicted_ids[0][response_start:seq_len]
+                    if len(predict_ids) > 0:
+                        predict_text = self.processing_class.decode(
+                            predict_ids, skip_special_tokens=True
+                        )
+                
+                self.logger.log(
+                    step=self.state.global_step,
+                    epoch=int(self.state.epoch) + 1 if self.state.epoch is not None else 1,
+                    loss_result=loss_result,
+                    predict=predict_text,
+                    label=label_text,
+                    accuracy=train_accuracy
+                )
+            
+            if return_outputs:
+                return (loss_result.total_loss, loss_result.outputs)
+            return loss_result.total_loss
+
+        def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
+            """
+            Custom prediction_step that avoids storing full outputs.
+            Uses the same loss_handler as training for consistency.
+            
+            Key differences from super().prediction_step():
+            - Does NOT call super() which internally stores outputs/logits
+            - Uses the same loss_handler as training (MC sampling for heteroscedastic)
+            - Explicit memory cleanup (no backward() to trigger automatic cleanup)
+            """
+            model.eval()
+            labels = inputs.get("labels")
+            
+            with torch.no_grad():
+                # Use the same loss handler as training (MC sampling for heteroscedastic)
+                loss_result = self.loss_handler(model, inputs, self)
+                loss = loss_result.total_loss.detach()
+                
+                # Update token error tracker (from loss_result.outputs)
+                if hasattr(self, 'token_error_tracker') and loss_result.outputs is not None:
+                    logits = loss_result.outputs.logits
+                    if logits is not None and labels is not None:
+                        # Shift for next-token prediction (logits[i] predicts labels[i+1])
+                        shift_logits = logits[..., :-1, :]
+                        shift_labels = labels[..., 1:]
+                        
+                        predicted_ids = shift_logits.argmax(dim=-1)
+                        mask = shift_labels != -100
+                        self.token_error_tracker.update(predicted_ids, shift_labels, mask)
+            
+            # Return only loss (no logits to accumulate)
+            return loss, None, labels
+
+    # ==========================================================================
+    # Training Logic
+    # ==========================================================================
     # Set environment based on --local flag (for path management)
     set_local_mode(args.local)
     
@@ -216,11 +283,11 @@ def run_training(args):
                     output.requires_grad_(True)
                 model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
         
-        # Load Dataset using custom module
-        tokenized_datasets = dataset_module.get_dataset(args, tokenizer)
+        # Load Dataset using custom module (now returns tuple)
+        train_dataset, eval_dataset = dataset_module.get_dataset(args, tokenizer)
         
         # Validate dataset
-        if tokenized_datasets is None or len(tokenized_datasets) == 0:
+        if train_dataset is None or len(train_dataset) == 0:
             raise ValueError("Dataset is empty or None. Check --data_path argument.")
 
         # Calculate Parameter count
@@ -273,11 +340,29 @@ def run_training(args):
                  if args.debug:
                      print(f"[DEBUG] Syncing Trainer precision with model dtype ({model_dtype}): Enabling {arg_name}=True")
  
+        # Evaluation settings (only if val_ratio > 0)
+        eval_kwargs = {}
+        if args.val_ratio > 0 and eval_dataset is not None:
+            eval_kwargs = {
+                "eval_strategy": "epoch",  # renamed from evaluation_strategy in newer transformers
+                "metric_for_best_model": "eval_loss",
+                "greater_is_better": False,  # Lower loss is better
+            }
+            # load_best_model_at_end requires save_strategy to match eval_strategy
+            # Only enable when save_strategy is not "no"
+            if args.early_stopping_patience > 0 and args.save_strategy != "no":
+                eval_kwargs["load_best_model_at_end"] = True
+            if args.debug:
+                print(f"[DEBUG] Evaluation enabled: strategy=epoch, early_stopping_patience={args.early_stopping_patience}")
+                if args.save_strategy == "no" and args.early_stopping_patience > 0:
+                    print(f"[DEBUG] Warning: load_best_model_at_end disabled because save_strategy='no'")
+
         # Training Arguments
         # We strictly use the arguments provided by the user + dynamic precision flags.
         training_args = TrainingArguments(
             output_dir=final_output_dir,
             per_device_train_batch_size=args.batch_size,
+            per_device_eval_batch_size=args.batch_size,
             num_train_epochs=args.epochs,
             learning_rate=args.learning_rate,
             logging_steps=args.logging_steps,
@@ -286,6 +371,7 @@ def run_training(args):
             logging_dir=os.path.join(final_output_dir, 'logs'),
             remove_unused_columns=False,
             report_to="none",
+            **eval_kwargs,
             **dtype_kwargs
         )
 
@@ -305,18 +391,37 @@ def run_training(args):
              ref_model = None
              print_memory_stats("After (Skipped) Ref Model Load")
 
+        # Setup callbacks
+        callbacks = [CSVLoggingCallback(logger)]
+        if args.val_ratio > 0 and args.early_stopping_patience > 0 and eval_dataset is not None:
+            callbacks.append(EarlyStoppingCallback(
+                early_stopping_patience=args.early_stopping_patience,
+                early_stopping_threshold=0.0  # Any improvement counts
+            ))
+            if args.debug:
+                print(f"[DEBUG] EarlyStoppingCallback added with patience={args.early_stopping_patience}")
+
         trainer = CustomTrainer(
             loss_type=args.loss_type,
             logger=logger,
             debug=args.debug,
             model=model,
             args=training_args,
-            train_dataset=tokenized_datasets,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
             data_collator=default_data_collator,
-            callbacks=[CSVLoggingCallback(logger)],
+            callbacks=callbacks,
+            track_token_errors=args.track_token_errors,
+            pad_token_id=tokenizer.pad_token_id,
         )
         trainer.processing_class = tokenizer # Ensure trainer has tokenizer for GDPO
         trainer.ref_model = ref_model # Attach ref_model for GDPO
+        
+        # Add EvalAccuracyCallback after trainer is created (needs trainer reference)
+        if eval_dataset is not None:
+            trainer.add_callback(EvalAccuracyCallback(trainer, logger))
+            if args.debug:
+                print("[DEBUG] EvalAccuracyCallback added for epoch-level accuracy tracking")
         
         # Attach GDPO configuration to trainer
         trainer.gdpo_config = {
@@ -348,6 +453,8 @@ def run_training(args):
             "sequential": args.gdpo_sequential,
             # Heteroscedastic weight (legacy, for heteroscedastic_gdpo before refactor)
             "heteroscedastic_weight": args.heteroscedastic_weight,
+            # Token configuration (for [THINK] tokens, etc.)
+            "token_config": get_token_config(args.model_type),
         }
         
         # Attach heteroscedastic configuration to trainer
@@ -370,6 +477,12 @@ def run_training(args):
         
         tokenizer.save_pretrained(final_output_dir)
         print("Tokenizer saved.")
+        
+        # Save token error tracking results (if enabled)
+        if args.track_token_errors and hasattr(trainer, 'token_error_tracker'):
+            base_name = os.path.basename(logger.output_path).replace(".csv", "")
+            error_csv_path = os.path.join(get_result_dir(), f"token_errors_{base_name}.csv")
+            trainer.token_error_tracker.save_csv(error_csv_path, tokenizer)
 
     except Exception as e:
         print(f"An error occurred during training: {e}")
@@ -388,10 +501,24 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Run training for a specific model type")
     
-    parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=2)
-    parser.add_argument("--learning_rate", type=float, default=2e-5)
-    parser.add_argument("--data_path", type=str, default=None)
+    parser.add_argument("--epochs", type=int, default=1,
+                        help="Number of training epochs. Default: 1")
+    parser.add_argument("--batch_size", type=int, default=2,
+                        help="Training batch size per device. Default: 2")
+    parser.add_argument("--learning_rate", type=float, default=2e-5,
+                        help="Learning rate for optimizer. Default: 2e-5")
+    parser.add_argument("--data_path", type=str, default=None,
+                        help="Path to training data JSON file (required)")
+    
+    # Validation & Early Stopping Arguments
+    parser.add_argument("--val_ratio", type=float, default=0.3,
+                        help="Validation set ratio (0.0-1.0). Default: 0.3")
+    parser.add_argument("--early_stopping_patience", type=int, default=5,
+                        help="Early stopping patience. Stop if val_loss doesn't improve for N evals. Default: 5")
+    parser.add_argument("--stratify", type=str, default=None,
+                        help="Data property name for stratified split (e.g., 'type', 'task'). None=random split")
+    parser.add_argument("--track_token_errors", action="store_true",
+                        help="Track and save token-level prediction errors (validation only)")
     # parser.add_argument("--output_dir", type=str, default="fine_tuned_model") # We override this now
     
     # Standard HF Save Strategy Arguments
@@ -476,8 +603,36 @@ if __name__ == "__main__":
     parser.add_argument("--gpu", type=str, default=None,
                         help="GPU IDs to use (e.g., '0' or '6,7'). Default: '6,7' (server) or '0' (local)")
 
-    # Add Model Hyperparameters
-    model_module.add_model_args(parser)
+    # Model Hyperparameters (inlined from model.add_model_args for fast --help)
+    model_group = parser.add_argument_group("Model Hyperparameters")
+    model_group.add_argument("--model_type", type=str, default="ministral_3_3b_instruct", 
+                             help="Type of model to use. Must match a python filename (e.g. ministral_3_3b_instruct)")
+    model_group.add_argument("--model_path", type=str, default=None, 
+                             help="Explicit path to load model weights from (overrides default resolved path)")
+    model_group.add_argument("--load_until_layer", type=str, default=None, 
+                             help="Load weights only up to this layer name (inclusive)")
+    model_group.add_argument("--freeze_until_layer", type=str, default=None, 
+                             help="Freeze gradients up to this layer name (inclusive). "
+                                  "Use layer number (e.g., '24') or '-1' to freeze ALL layers "
+                                  "(useful for training only new parameters like mHC)")
+    model_group.add_argument("--base_model_path", type=str, default=None,
+                             help="Path to base model for partial weight loading. "
+                                  "Loads matching weights from base model into target model. "
+                                  "Non-matching parameters (e.g., mHC layers) keep their initial values.")
+    # Model config overrides
+    model_group.add_argument("--hidden_size", type=int, default=None)
+    model_group.add_argument("--num_hidden_layers", type=int, default=None)
+    model_group.add_argument("--num_attention_heads", type=int, default=None)
+    model_group.add_argument("--num_key_value_heads", type=int, default=None)
+    model_group.add_argument("--intermediate_size", type=int, default=None)
+    model_group.add_argument("--vocab_size", type=int, default=None)
+    model_group.add_argument("--max_position_embeddings", type=int, default=None)
+    model_group.add_argument("--rope_theta", type=float, default=None)
+    model_group.add_argument("--quantization", type=str, default="fp8",
+                             choices=["fp8", "bf16", "fp16", "fp32"],
+                             help="Model weight precision. "
+                                  "fp8=FP8 storage→BF16 compute (default), "
+                                  "bf16/fp16/fp32=pure precision")
 
     args = parser.parse_args()
     run_training(args)
