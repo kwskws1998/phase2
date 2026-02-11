@@ -5,8 +5,20 @@ A reasoning-enhanced LLM fine-tuned from Mistral AI's Ministral 3 3B using GDPO 
 ## Requirements
 
 - Python >= 3.11
-- CUDA GPU (recommended: 24GB VRAM)
+- CUDA GPU (inference: 8GB+ VRAM, training: 16GB+ recommended)
 - PyTorch with CUDA
+
+### Key Dependencies
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| transformers | >= 5.0.0 | Model loading & training |
+| torch | latest | Deep learning framework |
+| accelerate | latest | Training acceleration |
+| safetensors | latest | Model weight format |
+| mistral-common | >= 1.8.6 | Mistral tokenizer |
+| scikit-learn | latest | Stratified splitting |
+| matplotlib | latest | Visualization |
 
 ## Installation
 
@@ -96,39 +108,6 @@ python training.py --model_type ministral_3_3b_instruct --data_path data/train.j
 | `heteroscedastic_uncertainty` | Learned (model output) | Model learns per-token uncertainty |
 | `non_learnable_heteroscedastic_uncertainty` | `logits.std()` | Uses logit standard deviation as uncertainty |
 
-**Full Training Example:**
-
-Below is a comprehensive example showing commonly used training options:
-
-```bash
-python training.py --local \
-    --model_type <your_model_type> \
-    --loss_type <loss_type> \
-    --data_path <your_data.json> \
-    --epochs 100 \
-    --batch_size 32 \
-    --freeze_until_layer 13 \
-    --val_ratio 0.3 \
-    --early_stopping_patience 5 \
-    --heteroscedastic_T 32 \
-    --track_token_errors \
-    --debug \
-    --save_strategy no
-```
-
-Where:
-- `<your_model_type>`: Model type (e.g., `ministral_3_3b_instruct`)
-- `<loss_type>`: Loss function (`cross_entropy`, `heteroscedastic_uncertainty`, `non_learnable_heteroscedastic_uncertainty`)
-- `<your_data.json>`: Training data path (e.g., `data/train.json`)
-
-Key options:
-- `--freeze_until_layer 13`: Freeze first 13 layers (train ~60% of model)
-- `--val_ratio 0.3`: 30% validation split
-- `--early_stopping_patience 5`: Stop if no improvement for 5 epochs
-- `--heteroscedastic_T 32`: 32 Monte Carlo samples (for heteroscedastic loss types)
-- `--track_token_errors`: Track per-token prediction errors
-- `--save_strategy no`: Don't save intermediate checkpoints
-
 **Heteroscedastic Uncertainty Loss:**
 
 The model learns per-token uncertainty σ alongside predictions. The loss uses Monte Carlo sampling:
@@ -180,6 +159,39 @@ The hierarchical reward system works as follows:
 2. **Accuracy** (hard): If fail, Tool Correctness and Easy rewards are zeroed
 3. **Tool Correctness** (medium): If fail, Easy rewards are zeroed
 4. **Easy rewards** (Format, Length, Tool Format): Granted only if all above pass
+
+### Full Training Example
+
+Below is a comprehensive example showing commonly used training options:
+
+```bash
+python training.py --local \
+    --model_type <your_model_type> \
+    --loss_type <loss_type> \
+    --data_path <your_data.json> \
+    --epochs 100 \
+    --batch_size 32 \
+    --freeze_until_layer 13 \
+    --val_ratio 0.3 \
+    --early_stopping_patience 5 \
+    --heteroscedastic_T 32 \
+    --track_token_errors \
+    --debug \
+    --save_strategy no
+```
+
+Where:
+- `<your_model_type>`: Model type (e.g., `ministral_3_3b_instruct`)
+- `<loss_type>`: Loss function (`cross_entropy`, `heteroscedastic_uncertainty`, `non_learnable_heteroscedastic_uncertainty`, `gdpo`)
+- `<your_data.json>`: Training data path (e.g., `data/train.json`)
+
+Key options:
+- `--freeze_until_layer 13`: Freeze first 13 layers (train ~60% of model)
+- `--val_ratio 0.3`: 30% validation split
+- `--early_stopping_patience 5`: Stop if no improvement for 5 epochs
+- `--heteroscedastic_T 32`: 32 Monte Carlo samples (for heteroscedastic loss types)
+- `--track_token_errors`: Track per-token prediction errors
+- `--save_strategy no`: Don't save intermediate checkpoints
 
 ## GPU Configuration
 
