@@ -312,7 +312,7 @@ def run_training(args):
             
         folder_name = f"{args.model_type}-{freeze_str}-{param_str}-{args.epochs}ep-{save_info}-{date_str}-{time_str}"
         
-        base_output_dir = os.path.join("model", "train")
+        base_output_dir = os.path.join(get_model_dir(), "train")
         final_output_dir = os.path.join(base_output_dir, folder_name)
         
         if not os.path.exists(final_output_dir):
@@ -451,6 +451,9 @@ def run_training(args):
             "tool_correctness_threshold": args.gdpo_tool_correctness_threshold,
             # Memory Optimization
             "sequential": args.gdpo_sequential,
+            # Heteroscedastic configuration (for MC sampling in uncertainty computation)
+            "heteroscedastic_T": args.heteroscedastic_T,
+            "heteroscedastic_sequential": args.heteroscedastic_sequential,
             # Heteroscedastic weight (legacy, for heteroscedastic_gdpo before refactor)
             "heteroscedastic_weight": args.heteroscedastic_weight,
             # Token configuration (for [THINK] tokens, etc.)
@@ -459,6 +462,7 @@ def run_training(args):
         
         # Attach heteroscedastic configuration to trainer
         trainer.heteroscedastic_T = args.heteroscedastic_T
+        trainer.heteroscedastic_sequential = args.heteroscedastic_sequential
 
         print("Starting training...")
         print_memory_stats("Before Trainer Loop (Pre-Optimizer Init)")
@@ -588,6 +592,8 @@ if __name__ == "__main__":
                         help="Number of Monte Carlo samples for heteroscedastic loss (default: 3, memory-efficient)")
     parser.add_argument("--heteroscedastic_weight", type=float, default=0.1,
                         help="Weight for heteroscedastic loss term in heteroscedastic_gdpo (default: 0.1)")
+    parser.add_argument("--heteroscedastic_sequential", action="store_true",
+                        help="Use sequential MC sampling for lower memory (slower)")
     
     # Training Stability
     parser.add_argument("--random_seed", type=int, default=-1,

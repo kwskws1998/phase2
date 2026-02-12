@@ -127,6 +127,11 @@ Where:
 
 This enables the model to express confidence in its predictions by learning input-dependent uncertainty.
 
+**Memory Optimization:**
+- By default, MC sampling runs in parallel (fast, higher memory)
+- With `--heteroscedastic_sequential`, samples are processed one at a time (slower, lower memory)
+- Use sequential mode when running out of GPU memory with high `--heteroscedastic_T`
+
 **Stage 2: GDPO** (continue from SFT model)
 ```bash
 python training.py --model_type ministral_3_3b_instruct --model_path model/train/sft-model-folder --data_path data/train.json --loss_type gdpo --epochs 2 --gdpo_group_size 4 --freeze_until_layer 24
@@ -190,6 +195,7 @@ Key options:
 - `--val_ratio 0.3`: 30% validation split
 - `--early_stopping_patience 5`: Stop if no improvement for 5 epochs
 - `--heteroscedastic_T 32`: 32 Monte Carlo samples (for heteroscedastic loss types)
+- `--heteroscedastic_sequential`: Sequential MC sampling for lower memory (optional)
 - `--track_token_errors`: Track per-token prediction errors
 - `--save_strategy no`: Don't save intermediate checkpoints
 

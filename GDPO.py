@@ -1307,11 +1307,12 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         """
         eps = 1e-8
         T = self.gdpo_config.get("heteroscedastic_T", 3)
+        sequential = self.gdpo_config.get("heteroscedastic_sequential", False)
         
         # Use Monte Carlo to compute probability of correct tokens
         # All samples are detached except the last (but for reward we don't need gradients)
         log_probs, _ = compute_heteroscedastic_log_probs(
-            shift_logits, shift_labels, T=T, return_sigma=True
+            shift_logits, shift_labels, T=T, sequential=sequential, return_sigma=True
         )
         
         # Convert log probs to probabilities

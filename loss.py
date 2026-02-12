@@ -100,6 +100,7 @@ def heteroscedastic_uncertainty_loss(model, inputs, trainer_context) -> LossResu
         LossResult with components: {"heteroscedastic_loss", "sigma_*", "variance_*", "cross_entropy"}
     """
     T = getattr(trainer_context, 'heteroscedastic_T', 3)
+    sequential = getattr(trainer_context, 'heteroscedastic_sequential', False)
     debug = getattr(trainer_context, 'debug', False)
     
     # Extract labels before forward pass
@@ -125,7 +126,7 @@ def heteroscedastic_uncertainty_loss(model, inputs, trainer_context) -> LossResu
     
     # Monte Carlo log probs with LEARNED σ
     log_probs, sigma_stats = compute_learned_heteroscedastic_log_probs(
-        shift_logits, shift_log_var, shift_labels, T=T
+        shift_logits, shift_log_var, shift_labels, T=T, sequential=sequential
     )
     
     # Masking
@@ -145,6 +146,7 @@ def heteroscedastic_uncertainty_loss(model, inputs, trainer_context) -> LossResu
               f"Log Variance Mean: {sigma_stats['log_variance_mean']:.4f}")
         print(f"[DEBUG] Log Prob Mean: {log_prob_mean:.4f}, Valid tokens: {valid_count}")
         print(f"[DEBUG] Heteroscedastic Loss: {loss.item():.4f}")
+        print(f"[DEBUG] Total Loss: {loss.item():.4f}")
     
     return LossResult(
         total_loss=loss,
@@ -178,6 +180,7 @@ def non_learnable_heteroscedastic_uncertainty_loss(model, inputs, trainer_contex
         LossResult with components: {"heteroscedastic_loss", "cross_entropy", "sigma_*"}
     """
     T = getattr(trainer_context, 'heteroscedastic_T', 3)
+    sequential = getattr(trainer_context, 'heteroscedastic_sequential', False)
     debug = getattr(trainer_context, 'debug', False)
     
     # Extract labels before forward pass
@@ -198,10 +201,10 @@ def non_learnable_heteroscedastic_uncertainty_loss(model, inputs, trainer_contex
     # Monte Carlo log probs with σ = logits.std() (not learned)
     if debug:
         log_probs, debug_info = compute_heteroscedastic_log_probs(
-            shift_logits, shift_labels, T=T, debug=True
+            shift_logits, shift_labels, T=T, sequential=sequential, debug=True
         )
         sigma_stats = {k: v for k, v in debug_info.items() if k.startswith("sigma_")}
-        print(f"[DEBUG] Non-Learnable Heteroscedastic Uncertainty Loss - T={T}")
+        print(f"[DEBUG] Non-Learnable Heteroscedastic Uncertainty Loss - T={T}, sequential={sequential}")
         print(f"[DEBUG] Sigma - Mean: {debug_info['sigma_mean']:.4f}, "
               f"Std: {debug_info['sigma_std']:.4f}, "
               f"Range: [{debug_info['sigma_min']:.4f}, {debug_info['sigma_max']:.4f}]")
@@ -209,7 +212,7 @@ def non_learnable_heteroscedastic_uncertainty_loss(model, inputs, trainer_contex
               f"Std: {debug_info['avg_prob_std']:.6f}")
     else:
         log_probs, sigma_stats = compute_heteroscedastic_log_probs(
-            shift_logits, shift_labels, T=T, return_sigma=True
+            shift_logits, shift_labels, T=T, sequential=sequential, return_sigma=True
         )
     
     # Masking on shifted labels
@@ -223,6 +226,7 @@ def non_learnable_heteroscedastic_uncertainty_loss(model, inputs, trainer_contex
         log_prob_mean = (log_probs * valid_mask).sum().item() / max(valid_count, 1)
         print(f"[DEBUG] Log Prob Mean: {log_prob_mean:.4f}, Valid tokens: {valid_count}")
         print(f"[DEBUG] Heteroscedastic Loss: {loss.item():.4f}")
+        print(f"[DEBUG] Total Loss: {loss.item():.4f}")
     
     return LossResult(
         total_loss=loss,

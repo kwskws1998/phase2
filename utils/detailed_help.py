@@ -11,15 +11,14 @@ DETAILED_HELP = {
     # ===================
     # Common Arguments
     # ===================
-    "model": """--model: Specify the model to use
+    "model_type": """--model_type: Specify the model architecture to use
 
 Usage:
-  --model ministral_3_3b_instruct     Default model
-  --model train/my_finetuned          Fine-tuned model (searched in model/train/)
+  --model_type ministral_3_3b_instruct     Default model (3B parameters)
 
-Model path search order:
-  1. model/{model_name}/
-  2. model/train/{model_name}/
+Note:
+  - Must match a Python filename in the architectures directory
+  - Use --model_path to specify custom weight location
 """,
 
     "data_path": """--data_path: Data file path
@@ -467,6 +466,108 @@ Usage:
   --gdpo_target_length 2048    Prefer longer responses
 
 Length reward penalizes deviation from target length.
+""",
+
+    # ===================
+    # Training Arguments (newly added)
+    # ===================
+    "val_ratio": """--val_ratio: Validation set ratio
+
+Usage:
+  --val_ratio 0.3     30% validation, 70% training (default)
+  --val_ratio 0.2     20% validation, 80% training
+  --val_ratio 0.0     No validation set
+
+Note:
+  - Used for early stopping and evaluation
+  - Requires --early_stopping_patience > 0 to enable early stopping
+""",
+
+    "early_stopping_patience": """--early_stopping_patience: Early stopping patience
+
+Usage:
+  --early_stopping_patience 5     Stop if no improvement for 5 epochs (default)
+  --early_stopping_patience 0     Disable early stopping
+
+Note:
+  - Monitors eval_loss for improvement
+  - Requires val_ratio > 0 to work
+""",
+
+    "stratify": """--stratify: Stratified train/val split by data property
+
+Usage:
+  --stratify type       Split by "type" field in data
+  --stratify task       Split by "task" field in data
+
+Note:
+  - Maintains same ratio of categories in train and val sets
+  - If not specified, random sampling is used
+""",
+
+    "track_token_errors": """--track_token_errors: Track per-token prediction errors
+
+Usage:
+  --track_token_errors     Enable token error tracking
+
+Output:
+  - token_errors.csv with (predicted, actual, count) statistics
+  - Useful for analyzing model mistakes
+""",
+
+    "freeze_until_layer": """--freeze_until_layer: Freeze model layers up to specified layer
+
+Usage:
+  --freeze_until_layer 24     Freeze layers 0-24 (train only layers 25+)
+  --freeze_until_layer 13     Freeze layers 0-13 (train ~60% of model)
+
+Note:
+  - Reduces memory usage and training time
+  - Lower layers capture general features, higher layers capture task-specific
+""",
+
+    "save_strategy": """--save_strategy: Checkpoint saving strategy
+
+Usage:
+  --save_strategy epoch     Save after each epoch (default)
+  --save_strategy steps     Save every N steps (use with --save_steps)
+  --save_strategy no        Don't save intermediate checkpoints
+""",
+
+    "heteroscedastic_T": """--heteroscedastic_T: Monte Carlo samples for heteroscedastic loss
+
+Usage:
+  --heteroscedastic_T 3      3 samples (default, faster)
+  --heteroscedastic_T 32     32 samples (more accurate uncertainty)
+
+Note:
+  - Higher values = better uncertainty estimation but slower
+  - Only used with heteroscedastic loss types
+""",
+
+    "heteroscedastic_sequential": """--heteroscedastic_sequential: Use sequential MC sampling
+
+Usage:
+  (default)                        Parallel processing (faster, more memory)
+  --heteroscedastic_sequential     Sequential processing (slower, less memory)
+
+Behavior:
+  - Parallel (default): All T samples computed simultaneously
+    - Fast (vectorized operations)
+    - Memory: O(T * batch * seq_len * vocab_size)
+  
+  - Sequential: T samples computed one at a time
+    - Slower (T iterations of loop)
+    - Memory: O(batch * seq_len * vocab_size)
+
+Memory comparison (T=32, vocab=128K, seq=2048, bf16):
+  - Parallel: ~32GB peak GPU memory
+  - Sequential: ~1GB peak GPU memory
+
+Note:
+  - Use sequential if running out of GPU memory with high --heteroscedastic_T
+  - Results are mathematically identical (only performance differs)
+  - Affects: non_learnable_heteroscedastic_uncertainty, heteroscedastic_uncertainty, heteroscedastic_gdpo
 """,
 }
 
