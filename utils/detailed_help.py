@@ -167,14 +167,17 @@ Available:
 
   gdpo
     - Group reward-Decoupled Policy Optimization
-    - 3 objectives: Format, Length, Accuracy
-    - Add 4th objective (Temperature) with --gdpo_use_temperature_contrastive
+    - 5 objectives (tool rewards enabled by default):
+      Format, Length, Tool Format, Accuracy, Tool Correctness
+    - Add Temperature objective with --gdpo_use_temperature_contrastive
+    - Disable tool rewards with --gdpo_enable_tool_reward 0 (3 objectives)
 
   heteroscedastic_gdpo
-    - GDPO + Uncertainty Reward (4 objectives)
-    - Format, Length, Accuracy, Uncertainty
+    - GDPO + Uncertainty Reward (6 objectives with tool rewards):
+      Format, Length, Tool Format, Accuracy, Uncertainty, Tool Correctness
     - Integrates uncertainty as reward (not separate loss)
-    - Add 5th objective (Temperature) with --gdpo_use_temperature_contrastive
+    - Add Temperature objective with --gdpo_use_temperature_contrastive
+    - Disable tool rewards for 4 objectives
 
 Usage:
   --loss_type cross_entropy
@@ -438,11 +441,42 @@ Usage:
 Tool correctness score range: -3 to +3
 Threshold determines when tool rewards are conditioned in hierarchical system.
 
-Hierarchy:
-  1. Uncertainty (hardest)
+Hierarchy (from hardest to easiest):
+  1. Tool Correctness <- this threshold (hardest)
   2. Accuracy
-  3. Tool Correctness <- this threshold
+  3. Uncertainty (if enabled)
   4. Easy rewards (Format, Length, Tool Format)
+
+Note: Tool rewards are enabled by default in GDPO.
+""",
+
+    "gdpo_enable_tool_reward": """--gdpo_enable_tool_reward: Enable/disable tool reward system
+
+Usage:
+  (default)                     Tool rewards enabled (Tool Format + Tool Correctness)
+  --gdpo_enable_tool_reward 0   Disable tool rewards
+
+Tool Reward System (enabled by default per GDPO paper):
+  - Tool Format (Easy): Binary [0, 1] - checks [TOOL_CALLS] structure validity
+    - [TOOL_CALLS] tag presence
+    - Valid JSON parsing
+    - Required fields: "name", "arguments"
+  
+  - Tool Correctness (Hardest): Continuous [-3, 3] - semantic correctness
+    - r_name: Tool name matching (Jaccard similarity)
+    - r_param: Parameter name matching
+    - r_value: Parameter value matching
+
+Reward Indices when enabled:
+  0: Format (Easy)
+  1: Length (Easy)
+  2: Tool Format (Easy)
+  3: Accuracy (Hard)
+  4: Uncertainty (Medium, if heteroscedastic)
+  5: Tool Correctness (Hardest)
+
+Conditional Hierarchy:
+  Tool Correctness > Accuracy > Uncertainty > Easy (Format, Length, Tool Format)
 """,
 
     "gdpo_uncertainty_full_sequence": """--gdpo_uncertainty_full_sequence: Measure uncertainty on full sequence
