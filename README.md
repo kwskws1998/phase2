@@ -160,10 +160,47 @@ python training.py --model_type ministral_3_3b_instruct --model_path model/train
 | `--gdpo_tool_correctness_threshold` | 1.5 | Tool correctness threshold (~75% match required) |
 
 The hierarchical reward system works as follows:
-1. **Uncertainty** (hardest): If fail, all lower rewards are zeroed
-2. **Accuracy** (hard): If fail, Tool Correctness and Easy rewards are zeroed
-3. **Tool Correctness** (medium): If fail, Easy rewards are zeroed
+1. **Tool Correctness** (hardest): If fail, all lower rewards are zeroed
+2. **Accuracy** (hard): If fail, Medium and Easy rewards are zeroed
+3. **Uncertainty / Reasoning Quality** (medium): If either fail, Easy rewards are zeroed
 4. **Easy rewards** (Format, Length, Tool Format): Granted only if all above pass
+
+### LLM Reasoning Judge
+
+An optional LLM-based reasoning quality reward that evaluates `[THINK]...[/THINK]` blocks. Disabled by default.
+
+**Enable:**
+
+```bash
+python training.py --loss_type gdpo --gdpo_enable_reasoning_judge
+```
+
+**Configuration** (in `config.yaml`):
+
+```yaml
+reasoning_judge:
+  base_url: ""               # API endpoint (empty = Local mode)
+  api_key: ""                # API key (empty = Local or keyless server)
+  model: "biomni-r0-32b"    # Judge model name
+  use_vllm: false            # vLLM integration (not yet implemented)
+  timeout: 30                # API timeout seconds
+  max_workers: 8             # API concurrent threads
+```
+
+**Mode Detection:**
+
+| `api_key` | `base_url` | Mode | Example |
+|-----------|------------|------|---------|
+| set | empty | API (OpenAI) | `api_key: "sk-..."`, `model: "gpt-4o-mini"` |
+| optional | set | API (vLLM/custom) | `base_url: "http://localhost:8000/v1"` |
+| empty | empty | Local | Model loaded to GPU, stays resident |
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--gdpo_enable_reasoning_judge` | False | Enable reasoning quality reward |
+| `--gdpo_reward_weight_reasoning_quality` | 1.0 | Weight for reasoning quality reward |
 
 ### Full Training Example
 

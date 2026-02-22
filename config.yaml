@@ -16,3 +16,13 @@ paths:
 
 # 기본 환경 (--local 없으면 server 사용)
 default_environment: "server"
+
+# LLM Reasoning Judge configuration
+# Mode: api_key or base_url set -> API mode, neither -> Local mode
+reasoning_judge:
+  base_url: ""                  # API endpoint (empty = Local mode, set URL = API mode)
+  api_key: ""                   # API key (empty = Local mode or keyless server like vLLM)
+  model: "biomni-r0-32b"       # Judge model name
+  use_vllm: false               # vLLM internal integration (not yet implemented)
+  timeout: 30                   # API timeout in seconds
+  max_workers: 8                # API mode: concurrent call threads

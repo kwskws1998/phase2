@@ -67,7 +67,14 @@ def execute_tool_call(tool_name: str, arguments: Dict[str, Any], debug: bool = T
         except Exception as e:
             if debug:
                 print(f"[DEBUG] JSON extraction failed: {e}")
-            # Keep original raw if extraction fails
+        if 'raw' in arguments and len(arguments) == 1:
+            if debug:
+                print(f"[DEBUG] Could not parse arguments for '{tool_name}', returning error")
+            return {
+                "success": False,
+                "error": f"Failed to parse arguments for tool '{tool_name}': malformed JSON",
+                "tool": tool_name
+            }
     else:
         # DEBUG: Log tool call to terminal
         if debug:

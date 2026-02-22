@@ -16,7 +16,7 @@ class CreatePlanTool(Tool):
         ToolParameter(
             name="goal",
             type="string",
-            description="Goal to achieve",
+            description="Plan title as a concise noun phrase (e.g. 'CRISPR 스크린 실험 계획'). Do NOT use sentence endings like '합니다', '입니다'.",
             required=True
         ),
         ToolParameter(

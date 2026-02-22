@@ -11,6 +11,9 @@ from tools.base import Tool, ToolParameter, register_tool
 def generate_with_llm(prompt: str, max_tokens: int = 150, system_prompt: str = None) -> str:
     """Use global model to generate specific data for tool results.
     
+    Uses the same token-by-token generation path (generate_with_refusal_streaming)
+    as the main chat to ensure compatibility with custom model architectures.
+    
     Args:
         prompt: The prompt for LLM generation
         max_tokens: Maximum tokens to generate
@@ -20,49 +23,64 @@ def generate_with_llm(prompt: str, max_tokens: int = 150, system_prompt: str = N
         Generated text string, or empty string on failure
     """
     try:
-        # Import global model from inference (lazy import to avoid circular dependency)
-        from inference import global_model, global_tokenizer, global_args
+        import sys
+        import copy
+
+        _main = sys.modules.get('__main__')
+        if _main and hasattr(_main, 'global_model') and _main.global_model is not None:
+            global_model = _main.global_model
+            global_tokenizer = _main.global_tokenizer
+            global_args = _main.global_args
+            model_lock = _main.model_lock
+            generate_with_refusal_streaming = _main.generate_with_refusal_streaming
+        else:
+            from inference import (global_model, global_tokenizer, global_args,
+                                   model_lock, generate_with_refusal_streaming)
         
         if global_model is None or global_tokenizer is None:
+            print("[WARNING] generate_with_llm: model or tokenizer not loaded")
             return ""
         
-        # Build messages with optional system prompt
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
         
-        # Apply chat template
         text = global_tokenizer.apply_chat_template(
             messages,
             tokenize=False,
             add_generation_prompt=True
         )
         
-        # Tokenize
         inputs = global_tokenizer(text, return_tensors="pt")
-        if hasattr(global_model, 'device'):
-            inputs = {k: v.to(global_model.device) for k, v in inputs.items()}
         
-        # Generate
-        import torch
-        with torch.no_grad():
-            outputs = global_model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.9,
-                pad_token_id=global_tokenizer.eos_token_id
-            )
+        input_len = inputs['input_ids'].shape[1]
+        max_input = getattr(global_args, 'max_context', 32768) - max_tokens
+        if input_len > max_input and max_input > 0:
+            print(f"[WARNING] generate_with_llm: truncating {input_len} -> {max_input} tokens")
+            inputs['input_ids'] = inputs['input_ids'][:, -max_input:]
+            if 'attention_mask' in inputs:
+                inputs['attention_mask'] = inputs['attention_mask'][:, -max_input:]
         
-        # Decode only the new tokens
-        generated_ids = outputs[0][inputs['input_ids'].shape[1]:]
-        generated_text = global_tokenizer.decode(generated_ids, skip_special_tokens=True)
+        temp_args = copy.copy(global_args)
+        temp_args.max_length = max_tokens
         
-        return generated_text.strip()
+        with model_lock:
+            full_text = ""
+            for chunk in generate_with_refusal_streaming(
+                global_model, global_tokenizer, inputs, temp_args
+            ):
+                if chunk.get("done", False):
+                    full_text = chunk.get("full_text", full_text)
+                    break
+                else:
+                    full_text += chunk.get("token", "")
+        
+        return full_text.strip()
     except Exception as e:
-        print(f"[DEBUG] LLM generation failed in tool: {e}")
+        import traceback as tb
+        print(f"[ERROR] generate_with_llm failed: {type(e).__name__}: {e}")
+        tb.print_exc()
         return ""
 
 

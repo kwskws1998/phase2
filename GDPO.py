@@ -57,6 +57,15 @@ class GDPOBase:
         self.enable_tool_reward = self.gdpo_config.get("enable_tool_reward", True)
         self.tool_correctness_threshold = self.gdpo_config.get("tool_correctness_threshold", 1.5)
         
+        # Reasoning Judge config
+        self.enable_reasoning_judge = self.gdpo_config.get("enable_reasoning_judge", False)
+        self.reasoning_judge = None
+        self.reasoning_quality_threshold = 0.5
+        
+        if self.enable_reasoning_judge:
+            from utils.reasoning_judge import ReasoningJudge
+            self.reasoning_judge = ReasoningJudge()
+        
         # Memory Optimization config
         self.sequential = self.gdpo_config.get("sequential", False)
     
@@ -373,7 +382,8 @@ class GDPOBase:
         return expanded_gt_tools
     
     def get_reward_weights(self, num_objectives: int, has_uncertainty: bool = False, 
-                           has_tool_reward: bool = False) -> List[float]:
+                           has_tool_reward: bool = False,
+                           has_reasoning_judge: bool = False) -> List[float]:
         """
         Get reward weights as a list.
         
@@ -383,7 +393,8 @@ class GDPOBase:
         - 2: Tool Format (Easy)
         - 3: Accuracy (Hard)
         - 4: Uncertainty (Medium) - if enabled
-        - 5/4: Tool Correctness (Hardest)
+        - next: Reasoning Quality (Medium) - if enabled
+        - next: Tool Correctness (Hardest)
         - Last: Temperature - if enabled
         
         Objective indices when has_tool_reward=False:
@@ -391,12 +402,14 @@ class GDPOBase:
         - 1: Length (Easy)
         - 2: Accuracy (Hard)
         - 3: Uncertainty (Medium) - if enabled
+        - next: Reasoning Quality (Medium) - if enabled
         - Last: Temperature - if enabled
         
         Args:
             num_objectives: Number of objectives
             has_uncertainty: Whether uncertainty reward is enabled
             has_tool_reward: Whether tool rewards are enabled
+            has_reasoning_judge: Whether reasoning quality reward is enabled
         
         Returns:
             List of weights for each objective
@@ -404,7 +417,6 @@ class GDPOBase:
         weights_config = self.gdpo_config.get("reward_weights", {})
         
         if has_tool_reward:
-            # With tool rewards: Format, Length, Tool Format, Accuracy, [Uncertainty], Tool Correctness
             weights = [
                 weights_config.get("format", 1.0),
                 weights_config.get("length", 1.0),
@@ -415,9 +427,11 @@ class GDPOBase:
             if has_uncertainty:
                 weights.append(weights_config.get("uncertainty", 1.0))
             
+            if has_reasoning_judge:
+                weights.append(weights_config.get("reasoning_quality", 1.0))
+            
             weights.append(weights_config.get("tool_correctness", 1.0))
         else:
-            # Without tool rewards: Format, Length, Accuracy, [Uncertainty]
             weights = [
                 weights_config.get("format", 1.0),
                 weights_config.get("length", 1.0),
@@ -426,6 +440,9 @@ class GDPOBase:
             
             if has_uncertainty:
                 weights.append(weights_config.get("uncertainty", 1.0))
+            
+            if has_reasoning_judge:
+                weights.append(weights_config.get("reasoning_quality", 1.0))
         
         # Temperature weight is added at the end if needed
         if len(weights) < num_objectives:
@@ -550,6 +567,52 @@ class GDPOBase:
             kl_penalty = self.kl_coef * (kl * valid_mask).sum() / (valid_mask.sum() + eps)
         
         return kl_penalty, kl
+    
+    def judge_rollout_reasoning(
+        self,
+        sequences: torch.Tensor,
+        input_ids: torch.Tensor,
+        references: Optional[List[str]] = None,
+    ) -> Optional[torch.Tensor]:
+        """
+        Judge reasoning quality for generated rollout sequences.
+        
+        Args:
+            sequences: Generated sequences (B*G, seq_len)
+            input_ids: Original input IDs (B, seq_len) for question extraction
+            references: Optional reference answers
+        
+        Returns:
+            Tensor of scores (B*G,) or None if judge is disabled
+        """
+        if self.reasoning_judge is None:
+            return None
+        
+        token_config = self.gdpo_config.get("token_config", Ministral3TokenConfig)
+        think_start = token_config.THINK_START or "[THINK]"
+        think_end = token_config.THINK_END or "[/THINK]"
+        
+        texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=True)
+        
+        B = input_ids.shape[0]
+        questions_raw = self.tokenizer.batch_decode(input_ids, skip_special_tokens=True)
+        effective_G = len(texts) // B
+        questions = []
+        for q in questions_raw:
+            questions.extend([q] * effective_G)
+        
+        refs = references if references else [None] * len(texts)
+        
+        scores = self.reasoning_judge.judge_batch(
+            questions, texts, refs, think_start, think_end
+        )
+        
+        return torch.tensor(scores, dtype=torch.float32)
+    
+    def cleanup_judge(self):
+        """Release judge resources. Call at training end."""
+        if self.reasoning_judge is not None:
+            self.reasoning_judge.cleanup()
     
     def build_reward_config(self) -> Dict[str, Any]:
         """Build reward configuration dict."""
@@ -770,6 +833,7 @@ def compute_tool_correctness_reward(
 def compute_rewards(sequences, tokenizer, references=None, reward_config=None, 
                     token_config=None, num_objectives=3,
                     uncertainty_scores=None,
+                    reasoning_quality_scores=None,
                     temperature_rewards=None,
                     gt_tool_calls=None,
                     enable_tool_reward=True):
@@ -782,13 +846,14 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
     - Index 2: Tool Format [0, 1] - Easy level (structural validity)
     - Index 3: Accuracy Reward [0, 1] - Hard level
     - Index 4: Uncertainty Reward [-1, 0] - Medium level (optional)
-    - Index 5/4: Tool Correctness [-3, 3] - Hardest level
+    - next: Reasoning Quality [0, 1] - Medium level (optional)
+    - next: Tool Correctness [-3, 3] - Hardest level
     - Last: Temperature Reward [-1, 1] - Optional
     
     4-Level Hierarchy:
-    - Level 1 (Hardest): Tool Correctness - If fail, zero Acc, Uncertainty, Easy
-    - Level 2 (Hard): Accuracy - If fail, zero Uncertainty and Easy
-    - Level 3 (Medium): Uncertainty - If fail, zero Easy only
+    - Level 1 (Hardest): Tool Correctness - If fail, zero Acc, Uncertainty, Reasoning, Easy
+    - Level 2 (Hard): Accuracy - If fail, zero Uncertainty, Reasoning, and Easy
+    - Level 3 (Medium): Uncertainty / Reasoning Quality - If either fail, zero Easy only
     - Level 4 (Easy): Format, Length, Tool Format
     
     Args:
@@ -800,9 +865,11 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
             - target_length (int): Target length for length penalty calculation
             - uncertainty_threshold (float): Threshold for uncertainty (default 0.6)
             - tool_correctness_threshold (float): Threshold for Tool Correctness (default 1.5, ~75% match)
+            - reasoning_quality_threshold (float): Threshold for reasoning quality (default 0.5)
         token_config: Token configuration class (default: Ministral3TokenConfig)
         num_objectives: Number of reward objectives (default 3)
         uncertainty_scores: Optional (Batch*Group,) tensor of uncertainty scores (1 - prob_correct)
+        reasoning_quality_scores: Optional (Batch*Group,) list/tensor of reasoning quality scores [0, 1]
         temperature_rewards: Optional (Batch*Group,) tensor of temperature labels (+1 for low, -1 for high)
         gt_tool_calls: Optional list of ground truth tool call strings in [TOOL_CALLS]... format
         enable_tool_reward: Whether tool rewards (Format + Correctness) are enabled (default True)
@@ -810,20 +877,21 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
     Returns: (Batch * Group, num_objectives)
     """
     # Auto-adjust num_objectives based on enabled features
-    # Base: 3 (Format, Length, Accuracy) when tool rewards disabled
-    # Base: 5 (Format, Length, Tool Format, Accuracy, Tool Correctness) when tool rewards enabled
     if enable_tool_reward:
-        # Tool rewards add: Tool Format (idx 2) + Tool Correctness (idx 4 or 5)
         num_objectives = 5  # Format, Length, Tool Format, Accuracy, Tool Correctness
         if uncertainty_scores is not None:
-            num_objectives = 6  # +1 for Uncertainty at index 4
+            num_objectives += 1
+        if reasoning_quality_scores is not None:
+            num_objectives += 1
     else:
         num_objectives = 3  # Format, Length, Accuracy
         if uncertainty_scores is not None:
-            num_objectives = 4  # +1 for Uncertainty
+            num_objectives += 1
+        if reasoning_quality_scores is not None:
+            num_objectives += 1
     
     if temperature_rewards is not None:
-        num_objectives += 1  # Temperature at the end
+        num_objectives += 1
     
     batch_size = sequences.shape[0]
     texts = tokenizer.batch_decode(sequences, skip_special_tokens=True)
@@ -907,15 +975,15 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
                 tool_correct_score = compute_tool_correctness_reward(pred_calls, gt_calls)
         
         # 6. Hierarchical Conditional Rewards (4-Level Cascade)
-        # Order: Tool Correctness > Accuracy > Uncertainty > Easy
-        # Level 1: Tool Correct fail → zero all below
-        # Level 2: Accuracy fail → zero Uncertainty and Easy
-        # Level 3: Uncertainty fail → zero Easy only
-        # Level 4: Easy rewards (Format, Length, Tool Format)
+        # Level 1 (Hardest): Tool Correctness - fail → zero Acc, Medium, Easy
+        # Level 2 (Hard): Accuracy - fail → zero Medium and Easy
+        # Level 3 (Medium): Uncertainty / Reasoning Quality - either fail → zero Easy
+        # Level 4 (Easy): Format, Length, Tool Format
         uncertainty_reward = 0.0
+        reasoning_quality_reward = 0.0
         failed_level = 0  # 0 = all pass
         
-        # Compute uncertainty reward value first
+        # Compute uncertainty reward value
         if uncertainty_scores is not None and i < len(uncertainty_scores):
             u = uncertainty_scores[i]
             if isinstance(u, torch.Tensor):
@@ -927,73 +995,84 @@ def compute_rewards(sequences, tokenizer, references=None, reward_config=None,
             else:
                 uncertainty_reward = -u
         
-        # Determine failed level (check in order: Tool > Acc > Uncertainty)
-        if enable_tool_reward and tool_correct_score < tool_correctness_threshold:
-            failed_level = 1  # Tool Correctness fail (hardest)
-        elif acc_score < accuracy_threshold:
-            failed_level = 2  # Accuracy fail
-        elif uncertainty_scores is not None and uncertainty_reward == -1.0:
-            failed_level = 3  # Uncertainty fail (above threshold)
+        # Compute reasoning quality reward value
+        rq_threshold = reward_config.get("reasoning_quality_threshold", 0.5)
+        if reasoning_quality_scores is not None and i < len(reasoning_quality_scores):
+            rq = reasoning_quality_scores[i]
+            if isinstance(rq, torch.Tensor):
+                rq = rq.item()
+            reasoning_quality_reward = rq
         
-        # Apply hierarchical zeroing based on failed level
-        if failed_level >= 1:  # Tool Correct fail → zero Acc, Uncertainty, Easy
+        # Determine failed level (check in order: Tool > Acc > Uncertainty/ReasoningQuality)
+        if enable_tool_reward and tool_correct_score < tool_correctness_threshold:
+            failed_level = 1
+        elif acc_score < accuracy_threshold:
+            failed_level = 2
+        elif (uncertainty_scores is not None and uncertainty_reward == -1.0) or \
+             (reasoning_quality_scores is not None and reasoning_quality_reward < rq_threshold):
+            failed_level = 3
+        
+        # Apply hierarchical zeroing
+        if failed_level >= 1:
             acc_score = 0.0
             uncertainty_reward = 0.0
+            reasoning_quality_reward = 0.0
             format_score = 0.0
             length_score = 0.0
             tool_format_score = 0.0
-        elif failed_level >= 2:  # Accuracy fail → zero Uncertainty and Easy
+        elif failed_level >= 2:
             uncertainty_reward = 0.0
+            reasoning_quality_reward = 0.0
             format_score = 0.0
             length_score = 0.0
             tool_format_score = 0.0
-        elif failed_level >= 3:  # Uncertainty fail → zero Easy only
+        elif failed_level >= 3:
             format_score = 0.0
             length_score = 0.0
             tool_format_score = 0.0
         
-        # Assign rewards to tensor based on enable_tool_reward
+        # Assign rewards using dynamic index tracking
         rewards[i, 0] = format_score
         rewards[i, 1] = length_score
         
         if enable_tool_reward:
-            # With tool rewards: Format(0), Length(1), Tool Format(2), Accuracy(3), [Uncertainty(4)], Tool Correctness(4/5)
             rewards[i, 2] = tool_format_score
             rewards[i, 3] = acc_score
+            idx = 4
             
-            # Uncertainty Reward assignment (index 4)
             if uncertainty_scores is not None:
-                rewards[i, 4] = uncertainty_reward
-                # Tool Correctness at index 5
-                rewards[i, 5] = tool_correct_score
-            else:
-                # Tool Correctness at index 4
-                rewards[i, 4] = tool_correct_score
+                rewards[i, idx] = uncertainty_reward
+                idx += 1
             
-            # Temperature at the end
-            if temperature_rewards is not None:
-                temp_obj_idx = 5 if uncertainty_scores is None else 6
-                if i < len(temperature_rewards):
-                    t = temperature_rewards[i]
-                    if isinstance(t, torch.Tensor):
-                        t = t.item()
-                    rewards[i, temp_obj_idx] = t
+            if reasoning_quality_scores is not None:
+                rewards[i, idx] = reasoning_quality_reward
+                idx += 1
+            
+            rewards[i, idx] = tool_correct_score
+            idx += 1
+            
+            if temperature_rewards is not None and i < len(temperature_rewards):
+                t = temperature_rewards[i]
+                if isinstance(t, torch.Tensor):
+                    t = t.item()
+                rewards[i, idx] = t
         else:
-            # Without tool rewards: Format(0), Length(1), Accuracy(2), [Uncertainty(3)]
             rewards[i, 2] = acc_score
+            idx = 3
             
-            # Uncertainty Reward assignment (index 3)
             if uncertainty_scores is not None:
-                rewards[i, 3] = uncertainty_reward
+                rewards[i, idx] = uncertainty_reward
+                idx += 1
             
-            # Temperature at the end
-            if temperature_rewards is not None:
-                temp_obj_idx = 3 if uncertainty_scores is None else 4
-                if i < len(temperature_rewards):
-                    t = temperature_rewards[i]
-                    if isinstance(t, torch.Tensor):
-                        t = t.item()
-                    rewards[i, temp_obj_idx] = t
+            if reasoning_quality_scores is not None:
+                rewards[i, idx] = reasoning_quality_reward
+                idx += 1
+            
+            if temperature_rewards is not None and i < len(temperature_rewards):
+                t = temperature_rewards[i]
+                if isinstance(t, torch.Tensor):
+                    t = t.item()
+                rewards[i, idx] = t
         
     return rewards
 
@@ -1054,18 +1133,22 @@ class GDPOLoss(GDPOBase):
         expanded_refs = self.prepare_references(inputs, effective_G)
         expanded_gt_tools = self.prepare_gt_tool_calls(inputs, effective_G)
         
-        # 3. Determine num_objectives
-        # With tool rewards: 5 (Format, Length, Tool Format, Accuracy, Tool Correctness)
-        # Without tool rewards: 3 (Format, Length, Accuracy)
+        # 3. Reasoning judge
+        has_judge = self.enable_reasoning_judge
+        rq_scores = self.judge_rollout_reasoning(sequences, input_ids, expanded_refs) if has_judge else None
+        
+        # 4. Determine num_objectives
         has_tool_reward = self.enable_tool_reward
         if has_tool_reward:
-            n = 5  # Format, Length, Tool Format, Accuracy, Tool Correctness
+            n = 5
         else:
-            n = 3  # Format, Length, Accuracy
+            n = 3
+        if has_judge:
+            n += 1
         if temp_rewards is not None:
-            n += 1  # Temperature
+            n += 1
         
-        # 4. Compute rewards
+        # 5. Compute rewards
         reward_config = self.build_reward_config()
         
         rewards_flat = compute_rewards(
@@ -1074,33 +1157,35 @@ class GDPOLoss(GDPOBase):
             reward_config=reward_config,
             token_config=Ministral3TokenConfig,
             num_objectives=n,
+            reasoning_quality_scores=rq_scores,
             temperature_rewards=temp_rewards,
             gt_tool_calls=expanded_gt_tools,
             enable_tool_reward=has_tool_reward
         ).to(model.device)
         rewards = rewards_flat.view(B, effective_G, n)
         
-        # 5. Compute advantages
-        weights = self.get_reward_weights(n, has_uncertainty=False, has_tool_reward=has_tool_reward)
+        # 6. Compute advantages
+        weights = self.get_reward_weights(n, has_uncertainty=False, has_tool_reward=has_tool_reward,
+                                          has_reasoning_judge=has_judge)
         final_advantages_flat = self.compute_advantages(rewards, weights, model.device)
         
-        # 6. Forward pass & log probs
+        # 7. Forward pass & log probs
         input_len = input_ids.shape[1]
         outputs, logits, shift_logits, shift_labels, token_log_probs, valid_mask = \
             self.compute_log_probs(model, sequences, input_len)
         
-        # 7. KL penalty
+        # 8. KL penalty
         kl_penalty, kl = self.compute_kl_penalty(
             ref_model, sequences, token_log_probs, shift_labels, valid_mask
         )
         
-        # 8. Policy gradient loss
+        # 9. Policy gradient loss
         seq_log_prob = (token_log_probs * valid_mask).sum(dim=1)
         pg_loss = -(final_advantages_flat.detach() * seq_log_prob).mean()
         
         total_loss = pg_loss + kl_penalty
         
-        # 9. Logging
+        # 10. Logging
         reward_means = rewards.mean(dim=(0, 1))
         kl_penalty_val = kl_penalty.item() if isinstance(kl_penalty, torch.Tensor) else kl_penalty
         
@@ -1113,20 +1198,24 @@ class GDPOLoss(GDPOBase):
             "advantage_std": final_advantages_flat.std().item(),
         }
         
-        # Add rewards based on tool reward enabled
         if has_tool_reward:
-            # Indices: Format(0), Length(1), Tool Format(2), Accuracy(3), Tool Correctness(4)
             components["reward_tool_format"] = reward_means[2].item()
             components["reward_accuracy"] = reward_means[3].item()
-            components["reward_tool_correctness"] = reward_means[4].item()
-            next_idx = 5
+            idx = 4
+            if has_judge:
+                components["reward_reasoning_quality"] = reward_means[idx].item()
+                idx += 1
+            components["reward_tool_correctness"] = reward_means[idx].item()
+            idx += 1
         else:
-            # Indices: Format(0), Length(1), Accuracy(2)
             components["reward_accuracy"] = reward_means[2].item()
-            next_idx = 3
+            idx = 3
+            if has_judge:
+                components["reward_reasoning_quality"] = reward_means[idx].item()
+                idx += 1
         
         if temp_rewards is not None:
-            components["reward_temperature"] = reward_means[next_idx].item()
+            components["reward_temperature"] = reward_means[idx].item()
         
         # Memory cleanup
         del sequences, rewards_flat, rewards
@@ -1162,24 +1251,31 @@ class GDPOLoss(GDPOBase):
         expanded_refs = self.prepare_references(inputs, effective_G)
         expanded_gt_tools = self.prepare_gt_tool_calls(inputs, effective_G)
         
-        # 3. Determine num_objectives
-        # With tool rewards: 5 (Format, Length, Tool Format, Accuracy, Tool Correctness)
-        # Without tool rewards: 3 (Format, Length, Accuracy)
+        # 3. Reasoning judge (on padded sequences)
+        has_judge = self.enable_reasoning_judge
+        rq_scores = None
+        if has_judge:
+            sequences_for_judge = self.pad_sequences_list(sequences_list, device)
+            rq_scores = self.judge_rollout_reasoning(sequences_for_judge, input_ids, expanded_refs)
+            del sequences_for_judge
+        
+        # 4. Determine num_objectives
         has_tool_reward = self.enable_tool_reward
         if has_tool_reward:
-            n = 5  # Format, Length, Tool Format, Accuracy, Tool Correctness
+            n = 5
         else:
-            n = 3  # Format, Length, Accuracy
+            n = 3
+        if has_judge:
+            n += 1
         if temp_rewards is not None:
-            n += 1  # Temperature
+            n += 1
         
-        # 4. Compute rewards sequentially
+        # 5. Compute rewards sequentially
         reward_config = self.build_reward_config()
         all_rewards = []
         
         for i, seq_cpu in enumerate(sequences_list):
             seq_gpu = seq_cpu.to(device)
-            # Compute reward for single sample
             batch_temp_rewards = None
             if temp_rewards is not None:
                 start_idx = i * B
@@ -1198,12 +1294,19 @@ class GDPOLoss(GDPOBase):
                 end_idx = (i + 1) * B
                 batch_refs = expanded_refs[start_idx:end_idx]
             
+            batch_rq = None
+            if rq_scores is not None:
+                start_idx = i * B
+                end_idx = (i + 1) * B
+                batch_rq = rq_scores[start_idx:end_idx]
+            
             reward = compute_rewards(
                 seq_gpu, self.tokenizer,
                 references=batch_refs,
                 reward_config=reward_config,
                 token_config=Ministral3TokenConfig,
                 num_objectives=n,
+                reasoning_quality_scores=batch_rq,
                 temperature_rewards=batch_temp_rewards,
                 gt_tool_calls=batch_gt_tools,
                 enable_tool_reward=has_tool_reward
@@ -1217,15 +1320,15 @@ class GDPOLoss(GDPOBase):
         rewards_flat = torch.cat(all_rewards, dim=0).to(device)
         rewards = rewards_flat.view(B, effective_G, n)
         
-        weights = self.get_reward_weights(n, has_uncertainty=False, has_tool_reward=has_tool_reward)
+        weights = self.get_reward_weights(n, has_uncertainty=False, has_tool_reward=has_tool_reward,
+                                          has_reasoning_judge=has_judge)
         final_advantages_flat = self.compute_advantages(rewards, weights, device)
         
-        # 5. Forward pass sequentially with gradient accumulation
+        # 6. Forward pass sequentially
         input_len = input_ids.shape[1]
         total_pg_loss = torch.tensor(0.0, device=device, requires_grad=True)
         total_kl = torch.tensor(0.0, device=device)
         
-        # Pad sequences to uniform length for proper indexing
         sequences = self.pad_sequences_list(sequences_list, device)
         
         all_log_probs = []
@@ -1235,7 +1338,6 @@ class GDPOLoss(GDPOBase):
         for i, seq_cpu in enumerate(sequences_list):
             seq_gpu = seq_cpu.to(device)
             
-            # Pad to match max length
             max_len = sequences.shape[1]
             if seq_gpu.shape[1] < max_len:
                 padding = torch.full(
@@ -1253,7 +1355,6 @@ class GDPOLoss(GDPOBase):
             all_valid_masks.append(valid_mask)
             all_shift_labels.append(shift_labels)
             
-            # KL penalty per sample
             if ref_model is not None:
                 kl_per_sample = self.compute_single_kl(
                     ref_model, seq_gpu, token_log_probs, shift_labels, valid_mask
@@ -1264,14 +1365,12 @@ class GDPOLoss(GDPOBase):
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         
-        # Stack and compute policy gradient
         token_log_probs = torch.cat(all_log_probs, dim=0)
         valid_mask = torch.cat(all_valid_masks, dim=0)
         
         seq_log_prob = (token_log_probs * valid_mask).sum(dim=1)
         pg_loss = -(final_advantages_flat.detach() * seq_log_prob).mean()
         
-        # KL penalty
         eps = 1e-8
         total_samples = B * effective_G
         kl_penalty = self.kl_coef * total_kl / (total_samples + eps) if ref_model else 0.0
@@ -1291,20 +1390,24 @@ class GDPOLoss(GDPOBase):
             "advantage_std": final_advantages_flat.std().item(),
         }
         
-        # Add rewards based on tool reward enabled
         if has_tool_reward:
-            # Indices: Format(0), Length(1), Tool Format(2), Accuracy(3), Tool Correctness(4)
             components["reward_tool_format"] = reward_means[2].item()
             components["reward_accuracy"] = reward_means[3].item()
-            components["reward_tool_correctness"] = reward_means[4].item()
-            next_idx = 5
+            idx = 4
+            if has_judge:
+                components["reward_reasoning_quality"] = reward_means[idx].item()
+                idx += 1
+            components["reward_tool_correctness"] = reward_means[idx].item()
+            idx += 1
         else:
-            # Indices: Format(0), Length(1), Accuracy(2)
             components["reward_accuracy"] = reward_means[2].item()
-            next_idx = 3
+            idx = 3
+            if has_judge:
+                components["reward_reasoning_quality"] = reward_means[idx].item()
+                idx += 1
         
         if temp_rewards is not None:
-            components["reward_temperature"] = reward_means[next_idx].item()
+            components["reward_temperature"] = reward_means[idx].item()
         
         # Memory cleanup
         del sequences_list, sequences, rewards_flat, rewards
@@ -1486,18 +1589,22 @@ class HeteroscedasticGDPOLoss(GDPOBase):
                 shift_logits, shift_labels, valid_mask, reasoning_mask
             )
         
-        # 5. Determine num_objectives
-        # With tool rewards: 6 (Format, Length, Tool Format, Accuracy, Uncertainty, Tool Correctness)
-        # Without tool rewards: 4 (Format, Length, Accuracy, Uncertainty)
+        # 5. Reasoning judge
+        has_judge = self.enable_reasoning_judge
+        rq_scores = self.judge_rollout_reasoning(sequences, input_ids, expanded_refs) if has_judge else None
+        
+        # 6. Determine num_objectives
         has_tool_reward = self.enable_tool_reward
         if has_tool_reward:
             n = 6  # Format, Length, Tool Format, Accuracy, Uncertainty, Tool Correctness
         else:
             n = 4  # Format, Length, Accuracy, Uncertainty
+        if has_judge:
+            n += 1
         if temp_rewards is not None:
-            n += 1  # Temperature
+            n += 1
         
-        # 6. Compute rewards
+        # 7. Compute rewards
         reward_config = self.build_reward_config()
         reward_config["uncertainty_threshold"] = self.uncertainty_threshold
         
@@ -1508,28 +1615,30 @@ class HeteroscedasticGDPOLoss(GDPOBase):
             token_config=Ministral3TokenConfig,
             num_objectives=n,
             uncertainty_scores=uncertainty_scores.detach().cpu(),
+            reasoning_quality_scores=rq_scores,
             temperature_rewards=temp_rewards,
             gt_tool_calls=expanded_gt_tools,
             enable_tool_reward=has_tool_reward
         ).to(model.device)
         rewards = rewards_flat.view(B, effective_G, n)
         
-        # 7. Compute advantages
-        weights = self.get_reward_weights(n, has_uncertainty=True, has_tool_reward=has_tool_reward)
+        # 8. Compute advantages
+        weights = self.get_reward_weights(n, has_uncertainty=True, has_tool_reward=has_tool_reward,
+                                          has_reasoning_judge=has_judge)
         final_advantages_flat = self.compute_advantages(rewards, weights, model.device)
         
-        # 8. KL penalty
+        # 9. KL penalty
         kl_penalty, kl = self.compute_kl_penalty(
             ref_model, sequences, token_log_probs, shift_labels, valid_mask
         )
         
-        # 9. Policy gradient loss
+        # 10. Policy gradient loss
         seq_log_prob = (token_log_probs * valid_mask).sum(dim=1)
         pg_loss = -(final_advantages_flat.detach() * seq_log_prob).mean()
         
         total_loss = pg_loss + kl_penalty
         
-        # 10. Logging
+        # 11. Logging
         reward_means = rewards.mean(dim=(0, 1))
         kl_penalty_val = kl_penalty.item() if isinstance(kl_penalty, torch.Tensor) else kl_penalty
         
@@ -1546,22 +1655,26 @@ class HeteroscedasticGDPOLoss(GDPOBase):
             "advantage_std": final_advantages_flat.std().item(),
         }
         
-        # Add rewards based on tool reward enabled
         if has_tool_reward:
-            # Indices: Format(0), Length(1), Tool Format(2), Accuracy(3), Uncertainty(4), Tool Correctness(5)
             components["reward_tool_format"] = reward_means[2].item()
             components["reward_accuracy"] = reward_means[3].item()
             components["reward_uncertainty"] = reward_means[4].item()
-            components["reward_tool_correctness"] = reward_means[5].item()
-            next_idx = 6
+            idx = 5
+            if has_judge:
+                components["reward_reasoning_quality"] = reward_means[idx].item()
+                idx += 1
+            components["reward_tool_correctness"] = reward_means[idx].item()
+            idx += 1
         else:
-            # Indices: Format(0), Length(1), Accuracy(2), Uncertainty(3)
             components["reward_accuracy"] = reward_means[2].item()
             components["reward_uncertainty"] = reward_means[3].item()
-            next_idx = 4
+            idx = 4
+            if has_judge:
+                components["reward_reasoning_quality"] = reward_means[idx].item()
+                idx += 1
         
         if temp_rewards is not None:
-            components["reward_temperature"] = reward_means[next_idx].item()
+            components["reward_temperature"] = reward_means[idx].item()
         
         # Memory cleanup
         del sequences, rewards_flat, rewards
@@ -1665,18 +1778,26 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         uncertainty_scores = torch.cat(all_uncertainty, dim=0).to(device)
         prob_correct_all = torch.cat(all_prob_correct, dim=0).to(device)
         
-        # 4. Determine num_objectives
-        # With tool rewards: 6 (Format, Length, Tool Format, Accuracy, Uncertainty, Tool Correctness)
-        # Without tool rewards: 4 (Format, Length, Accuracy, Uncertainty)
+        # 4. Reasoning judge
+        has_judge = self.enable_reasoning_judge
+        rq_scores = None
+        if has_judge:
+            sequences_for_judge = self.pad_sequences_list(padded_sequences_list, device)
+            rq_scores = self.judge_rollout_reasoning(sequences_for_judge, input_ids, expanded_refs)
+            del sequences_for_judge
+        
+        # 5. Determine num_objectives
         has_tool_reward = self.enable_tool_reward
         if has_tool_reward:
-            n = 6  # Format, Length, Tool Format, Accuracy, Uncertainty, Tool Correctness
+            n = 6
         else:
-            n = 4  # Format, Length, Accuracy, Uncertainty
+            n = 4
+        if has_judge:
+            n += 1
         if temp_rewards is not None:
-            n += 1  # Temperature
+            n += 1
         
-        # 5. Compute rewards sequentially
+        # 6. Compute rewards sequentially
         reward_config = self.build_reward_config()
         reward_config["uncertainty_threshold"] = self.uncertainty_threshold
         all_rewards = []
@@ -1684,7 +1805,6 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         for i, seq_cpu in enumerate(padded_sequences_list):
             seq_gpu = seq_cpu.to(device)
             
-            # Get corresponding uncertainty scores
             start_idx = i * B
             end_idx = (i + 1) * B
             batch_uncertainty = uncertainty_scores[start_idx:end_idx].detach().cpu()
@@ -1701,6 +1821,10 @@ class HeteroscedasticGDPOLoss(GDPOBase):
             if expanded_refs is not None:
                 batch_refs = expanded_refs[start_idx:end_idx]
             
+            batch_rq = None
+            if rq_scores is not None:
+                batch_rq = rq_scores[start_idx:end_idx]
+            
             reward = compute_rewards(
                 seq_gpu, self.tokenizer,
                 references=batch_refs,
@@ -1708,6 +1832,7 @@ class HeteroscedasticGDPOLoss(GDPOBase):
                 token_config=Ministral3TokenConfig,
                 num_objectives=n,
                 uncertainty_scores=batch_uncertainty,
+                reasoning_quality_scores=batch_rq,
                 temperature_rewards=batch_temp_rewards,
                 gt_tool_calls=batch_gt_tools,
                 enable_tool_reward=has_tool_reward
@@ -1721,10 +1846,11 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         rewards_flat = torch.cat(all_rewards, dim=0).to(device)
         rewards = rewards_flat.view(B, effective_G, n)
         
-        weights = self.get_reward_weights(n, has_uncertainty=True, has_tool_reward=has_tool_reward)
+        weights = self.get_reward_weights(n, has_uncertainty=True, has_tool_reward=has_tool_reward,
+                                          has_reasoning_judge=has_judge)
         final_advantages_flat = self.compute_advantages(rewards, weights, device)
         
-        # 6. Compute KL sequentially
+        # 7. Compute KL sequentially
         total_kl = torch.tensor(0.0, device=device)
         
         if ref_model is not None:
@@ -1743,14 +1869,13 @@ class HeteroscedasticGDPOLoss(GDPOBase):
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
         
-        # 7. Compute policy gradient
+        # 8. Compute policy gradient
         token_log_probs = torch.cat([lp.to(device) for lp in all_log_probs], dim=0)
         valid_mask = torch.cat([vm.to(device) for vm in all_valid_masks], dim=0)
         
         seq_log_prob = (token_log_probs * valid_mask).sum(dim=1)
         pg_loss = -(final_advantages_flat.detach() * seq_log_prob).mean()
         
-        # KL penalty
         eps = 1e-8
         total_samples = B * effective_G
         kl_penalty = self.kl_coef * total_kl / (total_samples + eps) if ref_model else 0.0
@@ -1774,22 +1899,26 @@ class HeteroscedasticGDPOLoss(GDPOBase):
             "advantage_std": final_advantages_flat.std().item(),
         }
         
-        # Add rewards based on tool reward enabled
         if has_tool_reward:
-            # Indices: Format(0), Length(1), Tool Format(2), Accuracy(3), Uncertainty(4), Tool Correctness(5)
             components["reward_tool_format"] = reward_means[2].item()
             components["reward_accuracy"] = reward_means[3].item()
             components["reward_uncertainty"] = reward_means[4].item()
-            components["reward_tool_correctness"] = reward_means[5].item()
-            next_idx = 6
+            idx = 5
+            if has_judge:
+                components["reward_reasoning_quality"] = reward_means[idx].item()
+                idx += 1
+            components["reward_tool_correctness"] = reward_means[idx].item()
+            idx += 1
         else:
-            # Indices: Format(0), Length(1), Accuracy(2), Uncertainty(3)
             components["reward_accuracy"] = reward_means[2].item()
             components["reward_uncertainty"] = reward_means[3].item()
-            next_idx = 4
+            idx = 4
+            if has_judge:
+                components["reward_reasoning_quality"] = reward_means[idx].item()
+                idx += 1
         
         if temp_rewards is not None:
-            components["reward_temperature"] = reward_means[next_idx].item()
+            components["reward_temperature"] = reward_means[idx].item()
         
         # Memory cleanup
         del sequences_list, padded_sequences_list, rewards_flat, rewards

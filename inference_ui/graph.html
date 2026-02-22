@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plan Graph Editor</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="node-graph.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔗</text></svg>">
+</head>
+<body>
+    <div class="graph-standalone">
+        <div class="graph-standalone-header">
+            <span>Plan Graph Editor</span>
+            <button id="rerunPlanBtn">Re-run Plan</button>
+        </div>
+        <div class="node-graph-container" id="nodeGraphContainer">
+            <svg class="node-graph-svg" id="nodeGraphSvg"></svg>
+            <div class="node-graph-canvas" id="nodeGraphCanvas"></div>
+            <div class="ng-zoom-controls">
+                <button class="ng-zoom-btn" data-zoom="in" title="Zoom In">+</button>
+                <button class="ng-zoom-btn" data-zoom="out" title="Zoom Out">&minus;</button>
+                <button class="ng-zoom-btn" data-zoom="reset" title="Reset Zoom">&#8962;</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="nodes/node-registry.js"></script>
+    <script>
+    // ============================================
+    // Graph Standalone - Popout Logic
+    // ============================================
+
+    let graph = null;
+    let channel = null;
+
+    (async () => {
+        await NodeRegistry.loadAll();
+        const loadScript = (src) => new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = src;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
+        await loadScript('node-graph.js');
+
+        const theme = localStorage.getItem('theme') || 'soft-minimal';
+        document.documentElement.setAttribute('data-theme', theme);
+
+        const container = document.getElementById('nodeGraphContainer');
+        graph = new NodeGraph(container);
+
+        if (typeof BroadcastChannel !== 'undefined') {
+            channel = new BroadcastChannel('node-graph');
+            channel.onmessage = (e) => {
+                const { type, payload } = e.data;
+                switch (type) {
+                    case 'plan-data':
+                        if (payload && payload.steps) {
+                            graph.createFromPlan(payload);
+                            setTimeout(() => {
+                                graph._relayoutVertical();
+                                graph.fitToView();
+                                graph._needsLayout = null;
+                            }, 100);
+                        }
+                        break;
+                    case 'graph-state':
+                        if (payload) graph.setState(payload);
+                        break;
+                    case 'theme-change':
+                        document.documentElement.setAttribute('data-theme', payload);
+                        break;
+                    case 'step-update':
+                        if (payload) graph.setNodeStatus(`step-${payload.step}`, payload.status);
+                        break;
+                }
+            };
+            channel.postMessage({ type: 'request-state' });
+        }
+
+        document.getElementById('rerunPlanBtn').addEventListener('click', () => {
+            if (!graph) return;
+            const plan = graph.toExecutionPlan();
+            if (channel) {
+                channel.postMessage({ type: 'rerun-plan', payload: plan });
+            }
+        });
+
+        window.addEventListener('beforeunload', () => {
+            if (channel) {
+                channel.postMessage({ type: 'popout-closed' });
+            }
+        });
+    })();
+    </script>
+</body>
+</html>

@@ -200,6 +200,10 @@ Related arguments:
   Uncertainty (heteroscedastic_gdpo):
     --gdpo_uncertainty_threshold
     --gdpo_reward_weight_uncertainty
+  
+  Reasoning Judge:
+    --gdpo_enable_reasoning_judge
+    --gdpo_reward_weight_reasoning_quality
 """,
 
     "epochs": """--epochs: Number of training epochs
@@ -593,6 +597,45 @@ Usage:
 Note:
   - Higher values = better uncertainty estimation but slower
   - Only used with heteroscedastic loss types
+""",
+
+    "gdpo_enable_reasoning_judge": """--gdpo_enable_reasoning_judge: Enable LLM-based reasoning quality reward
+
+Usage:
+  --gdpo_enable_reasoning_judge
+
+Behavior:
+  When enabled, an LLM judge evaluates the quality of [THINK]...[/THINK] reasoning
+  for each rollout response. The score (0.0-1.0) becomes a reward at Level 3 (Medium),
+  same level as Uncertainty.
+
+  Mode is determined by config.yaml (reasoning_judge section):
+  - API Mode: Set api_key or base_url to use external LLM (GPT, vLLM server)
+  - Local Mode: Leave both empty to load judge model locally (stays resident in GPU)
+
+  Default judge model: biomni-r0-32b (local)
+
+config.yaml setup:
+  reasoning_judge:
+    base_url: ""          # empty = Local, URL = API mode
+    api_key: ""           # empty = Local or keyless server
+    model: "biomni-r0-32b"
+
+Note:
+  - Disabled by default (no impact on training unless explicitly enabled)
+  - Only affects GDPO and heteroscedastic_gdpo loss types
+  - Local mode keeps judge model in GPU memory throughout training
+""",
+
+    "gdpo_reward_weight_reasoning_quality": """--gdpo_reward_weight_reasoning_quality: Reasoning quality reward weight
+
+Usage:
+  --gdpo_reward_weight_reasoning_quality 1.0    Default
+  --gdpo_reward_weight_reasoning_quality 0.5    Reduce reasoning quality effect
+  --gdpo_reward_weight_reasoning_quality 2.0    Increase reasoning quality effect
+
+Weight for reasoning quality reward in GDPO advantage calculation.
+Only effective when --gdpo_enable_reasoning_judge is enabled.
 """,
 
     "heteroscedastic_sequential": """--heteroscedastic_sequential: Use sequential MC sampling

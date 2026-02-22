@@ -1,0 +1,1279 @@
+/* ============================================
+   Node Graph Styles
+   ============================================ */
+
+.node-graph-container {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    background-color: var(--bg-color);
+    background-image: radial-gradient(circle, var(--border-color) 1px, transparent 1px);
+    background-size: 20px 20px;
+    min-height: 200px;
+}
+
+.node-graph-svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+}
+
+.node-graph-svg path {
+    pointer-events: stroke;
+}
+
+.node-graph-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+}
+
+/* ---- Nodes ---- */
+
+.ng-node {
+    position: absolute;
+    min-width: 100px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    user-select: none;
+    z-index: 10;
+    transition: box-shadow 0.15s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+.ng-node:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.ng-node-selected {
+    border-color: var(--primary-color, #3b82f6);
+    outline: 1px solid rgba(59, 130, 246, 0.15);
+    outline-offset: 3px;
+}
+
+.ng-node-selected:hover {
+    border-color: var(--primary-color, #3b82f6);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2), 0 0 12px rgba(59, 130, 246, 0.1);
+    outline: 1px solid rgba(59, 130, 246, 0.15);
+    outline-offset: 3px;
+}
+
+/* ---- Resize Handles ---- */
+
+.ng-resize-handle {
+    position: absolute;
+    z-index: 15;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.ng-node:hover .ng-resize-handle,
+.ng-node-selected .ng-resize-handle {
+    opacity: 1;
+}
+
+.ng-resize-nw, .ng-resize-ne, .ng-resize-sw, .ng-resize-se {
+    width: 10px;
+    height: 10px;
+    background: transparent;
+}
+
+.ng-resize-nw { top: -4px; left: -4px; cursor: nw-resize; }
+.ng-resize-ne { top: -4px; right: -4px; cursor: ne-resize; }
+.ng-resize-sw { bottom: -4px; left: -4px; cursor: sw-resize; }
+.ng-resize-se { bottom: -4px; right: -4px; cursor: se-resize; }
+
+.ng-resize-n, .ng-resize-s {
+    left: 10px;
+    right: 10px;
+    height: 6px;
+    cursor: n-resize;
+}
+
+.ng-resize-e, .ng-resize-w {
+    top: 10px;
+    bottom: 10px;
+    width: 6px;
+    cursor: e-resize;
+}
+
+.ng-resize-n { top: -3px; cursor: n-resize; }
+.ng-resize-s { bottom: -3px; cursor: s-resize; }
+.ng-resize-e { right: -3px; cursor: e-resize; }
+.ng-resize-w { left: -3px; cursor: w-resize; }
+
+.ng-node-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    cursor: grab;
+    border-radius: 7px 7px 0 0;
+    background: var(--bg-secondary);
+}
+
+.ng-node-header:active {
+    cursor: grabbing;
+}
+
+.ng-node-num {
+    font-size: 11px;
+    font-weight: 700;
+    color: white;
+    background: var(--accent-primary);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.ng-node-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: default;
+}
+
+.ng-node-title-input {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-color);
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--primary-color, #3b82f6);
+    outline: none;
+    width: 100%;
+    padding: 0;
+    font-family: inherit;
+}
+
+.ng-node-body {
+    padding: 6px 12px 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: 'Fira Code', monospace;
+    overflow: hidden;
+    white-space: normal;
+    word-break: break-word;
+}
+
+/* ---- Port Type Colors ---- */
+
+:root {
+    --port-float: #a1c734;
+    --port-int: #29b6f6;
+    --port-string: #e040fb;
+    --port-any: #9e9e9e;
+    --port-data: #ff9800;
+}
+
+/* ---- Port Rows (multi-port distribution) ---- */
+
+.ng-ports-in-row,
+.ng-ports-out-row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: space-around;
+    pointer-events: none;
+    z-index: 20;
+}
+
+.ng-ports-in-row {
+    top: -6px;
+}
+
+.ng-ports-out-row {
+    bottom: -6px;
+}
+
+/* ---- Ports ---- */
+
+.ng-port {
+    position: relative;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    cursor: crosshair;
+    z-index: 20;
+    transition: all 0.15s ease;
+    pointer-events: auto;
+    flex-shrink: 0;
+}
+
+.ng-port:hover {
+    border-color: var(--primary-color, #3b82f6);
+    background: var(--primary-color, #3b82f6);
+    transform: scale(1.3);
+}
+
+.ng-port[data-port-type="float"] { border-color: var(--port-float); }
+.ng-port[data-port-type="int"] { border-color: var(--port-int); }
+.ng-port[data-port-type="string"] { border-color: var(--port-string); }
+.ng-port[data-port-type="data"] { border-color: var(--port-data); }
+.ng-port[data-port-type="any"] { border-color: var(--port-any); }
+
+.ng-port[data-port-type="float"]:hover { background: var(--port-float); border-color: var(--port-float); }
+.ng-port[data-port-type="int"]:hover { background: var(--port-int); border-color: var(--port-int); }
+.ng-port[data-port-type="string"]:hover { background: var(--port-string); border-color: var(--port-string); }
+.ng-port[data-port-type="data"]:hover { background: var(--port-data); border-color: var(--port-data); }
+.ng-port[data-port-type="any"]:hover { background: var(--port-any); border-color: var(--port-any); }
+
+.ng-port-compatible {
+    box-shadow: 0 0 3px currentColor;
+}
+
+.ng-port-dimmed {
+    border-color: #ccc !important;
+    background: #eee !important;
+    pointer-events: none;
+}
+
+/* Legacy single-port positioning (for nodes not using port rows) */
+.ng-port.ng-port-in:not(.ng-ports-in-row .ng-port) {
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.ng-port.ng-port-out:not(.ng-ports-out-row .ng-port) {
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+/* ---- Port Default Value Fields ---- */
+
+.ng-port-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    font-size: 11px;
+}
+
+.ng-port-field.ng-port-connected .ng-port-default {
+    display: none;
+}
+
+.ng-port-field.ng-port-connected .ng-port-label {
+    opacity: 0.5;
+}
+
+.ng-port-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.ng-port-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    min-width: 14px;
+}
+
+.ng-port-default {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-color, #1a1a1a);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    padding: 2px 6px;
+    color: var(--text-color);
+    font-size: 11px;
+    font-family: 'Fira Code', monospace;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.ng-port-default:focus {
+    border-color: var(--primary-color, #3b82f6);
+}
+
+/* Number input: hide spin buttons */
+.ng-port-default[type="number"]::-webkit-inner-spin-button,
+.ng-port-default[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.ng-port-default[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* ---- Connection Type Colors ---- */
+
+.ng-conn-type-float { stroke: var(--port-float); }
+.ng-conn-type-int { stroke: var(--port-int); }
+.ng-conn-type-string { stroke: var(--port-string); }
+.ng-conn-type-data { stroke: var(--port-data); }
+
+/* ---- Input Node Styles ---- */
+
+.ng-input-node-body {
+    padding: 6px 10px 8px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.ng-input-node-field {
+    width: 100%;
+    background: var(--bg-color, #1a1a1a);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: var(--text-color);
+    font-size: 12px;
+    font-family: 'Fira Code', monospace;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.ng-input-node-field:focus {
+    border-color: var(--primary-color, #3b82f6);
+}
+
+textarea.ng-input-node-field {
+    resize: none;
+    overflow-y: auto;
+    overflow-x: hidden;
+    line-height: 1.4;
+    min-height: 28px;
+    flex: 1 1 auto;
+}
+
+/* ---- Observe Node Styles ---- */
+
+.ng-observe-body {
+    padding: 6px 10px 8px;
+    min-height: 32px;
+}
+
+.ng-observe-output {
+    max-height: 80px;
+    overflow-y: auto;
+    font-size: 11px;
+    font-family: 'Fira Code', monospace;
+    color: var(--text-color);
+    background: var(--bg-color, #1a1a1a);
+    border-radius: 4px;
+    padding: 4px 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.4;
+}
+
+.ng-observe-placeholder {
+    color: var(--text-secondary, #888);
+    font-style: italic;
+}
+
+/* ---- Visualize Node Styles ---- */
+
+.ng-visualize-body {
+    padding: 6px 10px 8px;
+}
+
+.ng-visualize-output {
+    max-height: 100px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ng-visualize-output img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+}
+
+/* ---- Save Node Styles ---- */
+
+.ng-save-body {
+    padding: 6px 10px 8px;
+}
+
+.ng-save-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.ng-save-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-secondary, #888);
+    min-width: 32px;
+    flex-shrink: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.ng-save-field {
+    flex: 1;
+    font-size: 11px;
+    font-family: 'Fira Code', monospace;
+    padding: 3px 6px;
+    border: 1px solid var(--border-color, #444);
+    border-radius: 3px;
+    background: var(--bg-color, #1a1a1a);
+    color: var(--text-color);
+    outline: none;
+    min-width: 0;
+}
+
+.ng-save-field:focus {
+    border-color: var(--accent-primary, #3b82f6);
+}
+
+.ng-save-field::-webkit-inner-spin-button,
+.ng-save-field::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+}
+
+.ng-save-preview {
+    font-size: 10px;
+    font-family: 'Fira Code', monospace;
+    color: var(--text-secondary, #888);
+    padding: 3px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.7;
+}
+
+.ng-save-status {
+    font-size: 10px;
+    font-family: 'Fira Code', monospace;
+    color: var(--accent-primary, #3b82f6);
+    padding: 2px 0 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-height: 0;
+}
+
+.ng-save-status:empty {
+    display: none;
+}
+
+/* ---- Matrix Node Styles ---- */
+
+.ng-matrix-body {
+    padding: 6px 8px 8px;
+}
+
+.ng-matrix-grid {
+    display: grid;
+    gap: 2px;
+}
+
+.ng-matrix-3x3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.ng-matrix-4x4 {
+    grid-template-columns: repeat(4, 1fr);
+}
+
+.ng-matrix-cell {
+    width: 100%;
+    min-width: 0;
+    background: var(--bg-color, #1a1a1a);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    padding: 3px 4px;
+    color: var(--text-color);
+    font-size: 10px;
+    font-family: 'Fira Code', monospace;
+    text-align: center;
+    outline: none;
+    box-sizing: border-box;
+    -moz-appearance: textfield;
+}
+
+.ng-matrix-cell::-webkit-inner-spin-button,
+.ng-matrix-cell::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.ng-matrix-cell:focus {
+    border-color: var(--primary-color, #3b82f6);
+}
+
+/* ---- Table Node Styles ---- */
+
+.ng-table-body {
+    padding: 6px 8px 8px;
+    min-height: 32px;
+}
+
+.ng-table-output {
+    max-height: 100px;
+    overflow: auto;
+    font-size: 11px;
+    color: var(--text-color);
+    background: var(--bg-color, #1a1a1a);
+    border-radius: 4px;
+}
+
+.ng-table-output table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+    font-family: 'Fira Code', monospace;
+}
+
+.ng-table-output th,
+.ng-table-output td {
+    border: 1px solid var(--border-color);
+    padding: 2px 6px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.ng-table-output th {
+    background: var(--bg-secondary, #2a2a2a);
+    font-weight: 600;
+}
+
+.ng-table-placeholder {
+    color: var(--text-secondary, #888);
+    font-style: italic;
+    padding: 4px 8px;
+    display: block;
+}
+
+/* Math node body: override text overflow for port fields */
+.ng-math-body {
+    padding: 4px 0 6px;
+    white-space: normal;
+    overflow: visible;
+    font-family: inherit;
+}
+
+/* ---- Connections (SVG) ---- */
+
+.ng-connection {
+    fill: none;
+    stroke: var(--border-color);
+    stroke-width: 2;
+    transition: stroke 0.15s ease;
+    cursor: pointer;
+}
+
+.ng-connection:hover {
+    stroke: var(--primary-color, #3b82f6);
+    stroke-width: 3;
+}
+
+.ng-conn-selected {
+    stroke: var(--error, #ef4444);
+    stroke-width: 3.5;
+}
+
+.ng-conn-ref {
+    stroke-dasharray: 8 4;
+    opacity: 0.6;
+}
+
+.ng-conn-ref:hover {
+    opacity: 0.9;
+}
+
+.ng-conn-ref.ng-conn-selected {
+    stroke-dasharray: 8 4;
+    opacity: 1;
+}
+
+.ng-connection-hit {
+    fill: none;
+    stroke: transparent;
+    stroke-width: 14;
+    cursor: pointer;
+    pointer-events: stroke;
+}
+
+.ng-conn-pending {
+    stroke: var(--primary-color, #3b82f6);
+    stroke-width: 2;
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.ng-conn-pending-ref {
+    stroke: var(--primary-color, #3b82f6);
+    stroke-width: 2;
+    stroke-dasharray: 8 4;
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* ---- Node Status ---- */
+
+.ng-status-pending {
+    opacity: 0.6;
+}
+
+.ng-status-pending .ng-node-num {
+    background: var(--text-muted);
+}
+
+.ng-status-running {
+    border-color: var(--primary-color, #3b82f6);
+    animation: ng-pulse 1.5s infinite;
+}
+
+.ng-status-running .ng-node-num {
+    background: var(--primary-color, #3b82f6);
+}
+
+@keyframes ng-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.3); }
+    50% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0); }
+}
+
+.ng-status-completed {
+    border-color: #10b981;
+}
+
+.ng-status-completed .ng-node-num {
+    background: #10b981;
+}
+
+.ng-status-error {
+    border-color: #ef4444;
+}
+
+.ng-status-error .ng-node-num {
+    background: #ef4444;
+}
+
+.ng-status-stopped {
+    border-color: #9ca3af;
+    opacity: 0.7;
+}
+
+.ng-status-stopped .ng-node-num {
+    background: #9ca3af;
+}
+
+/* ---- Running Progress Bar ---- */
+
+.ng-node-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    overflow: hidden;
+    border-radius: 0 0 8px 8px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.ng-status-running .ng-node-progress {
+    opacity: 1;
+}
+
+.ng-node-progress::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -40%;
+    width: 40%;
+    height: 100%;
+    background: var(--primary-color, #3b82f6);
+    border-radius: 2px;
+    animation: ng-progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes ng-progress-slide {
+    0%   { left: -40%; }
+    100% { left: 100%; }
+}
+
+/* ---- Cyber Edge Theme ---- */
+
+[data-theme="cyber-edge"] .node-graph-container {
+    background-color: #1a1a18;
+    background-image: radial-gradient(circle, rgba(144, 145, 140, 0.2) 1px, transparent 1px);
+}
+
+[data-theme="cyber-edge"] .ng-node {
+    background: rgba(43, 43, 41, 0.95);
+    border-color: rgba(144, 145, 140, 0.3);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="cyber-edge"] .ng-node:hover {
+    box-shadow: 0 0 12px rgba(144, 145, 140, 0.2);
+}
+
+[data-theme="cyber-edge"] .ng-node-selected {
+    border-color: var(--accent-primary);
+    outline: 1px solid rgba(144, 145, 140, 0.15);
+    outline-offset: 3px;
+}
+
+[data-theme="cyber-edge"] .ng-node-selected:hover {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(144, 145, 140, 0.2), 0 0 12px rgba(144, 145, 140, 0.1);
+    outline: 1px solid rgba(144, 145, 140, 0.15);
+    outline-offset: 3px;
+}
+
+[data-theme="cyber-edge"] .ng-node-header {
+    background: rgba(30, 30, 28, 0.8);
+    border-color: rgba(144, 145, 140, 0.2);
+}
+
+[data-theme="cyber-edge"] .ng-port {
+    background: rgba(30, 30, 28, 0.9);
+    border-color: rgba(144, 145, 140, 0.5);
+}
+
+[data-theme="cyber-edge"] .ng-port:hover {
+    border-color: var(--accent-primary);
+    background: var(--accent-primary);
+}
+
+[data-theme="cyber-edge"] .ng-port-default {
+    background: rgba(20, 20, 18, 0.9);
+    border-color: rgba(144, 145, 140, 0.3);
+    color: rgba(144, 145, 140, 0.9);
+}
+
+[data-theme="cyber-edge"] .ng-port-default:focus {
+    border-color: var(--accent-primary);
+}
+
+[data-theme="cyber-edge"] .ng-input-node-field {
+    background: rgba(20, 20, 18, 0.9);
+    border-color: rgba(144, 145, 140, 0.3);
+    color: rgba(144, 145, 140, 0.9);
+}
+
+[data-theme="cyber-edge"] .ng-input-node-field:focus {
+    border-color: var(--accent-primary);
+}
+
+[data-theme="cyber-edge"] .ng-observe-output {
+    background: rgba(20, 20, 18, 0.9);
+    color: rgba(144, 145, 140, 0.9);
+}
+
+[data-theme="cyber-edge"] .ng-matrix-cell {
+    background: rgba(20, 20, 18, 0.9);
+    border-color: rgba(144, 145, 140, 0.3);
+    color: rgba(144, 145, 140, 0.9);
+}
+
+[data-theme="cyber-edge"] .ng-matrix-cell:focus {
+    border-color: var(--accent-primary);
+}
+
+[data-theme="cyber-edge"] .ng-table-output {
+    background: rgba(20, 20, 18, 0.9);
+}
+
+[data-theme="cyber-edge"] .ng-table-output th {
+    background: rgba(30, 30, 28, 0.9);
+}
+
+[data-theme="cyber-edge"] .ng-table-output th,
+[data-theme="cyber-edge"] .ng-table-output td {
+    border-color: rgba(144, 145, 140, 0.3);
+    color: rgba(144, 145, 140, 0.9);
+}
+
+[data-theme="cyber-edge"] .ng-save-field {
+    background: rgba(20, 20, 18, 0.9);
+    border-color: rgba(144, 145, 140, 0.3);
+    color: rgba(144, 145, 140, 0.9);
+}
+
+[data-theme="cyber-edge"] .ng-save-field:focus {
+    border-color: var(--accent-primary);
+}
+
+[data-theme="cyber-edge"] .ng-connection {
+    stroke: rgba(144, 145, 140, 0.4);
+}
+
+[data-theme="cyber-edge"] .ng-connection:hover {
+    stroke: var(--accent-primary);
+}
+
+[data-theme="cyber-edge"] .ng-conn-ref {
+    stroke: rgba(144, 145, 140, 0.25);
+}
+
+[data-theme="cyber-edge"] .ng-conn-ref:hover {
+    stroke: var(--accent-primary);
+}
+
+[data-theme="cyber-edge"] .ng-status-running {
+    border-color: var(--accent-primary);
+}
+
+[data-theme="cyber-edge"] .ng-node-progress::after {
+    background: var(--accent-primary);
+}
+
+/* ---- Create Node Menu ---- */
+
+.ng-create-menu {
+    position: absolute;
+    width: 220px;
+    max-height: 340px;
+    background: var(--bg-secondary, #1e1e1e);
+    border: 1px solid var(--border-color, #3a3a3a);
+    border-radius: 6px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-size: 13px;
+    user-select: none;
+}
+
+.ng-create-menu-search-wrap {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border-color, #3a3a3a);
+    gap: 6px;
+}
+
+.ng-create-menu-search-icon {
+    font-size: 12px;
+    opacity: 0.5;
+    flex-shrink: 0;
+}
+
+.ng-create-menu-search {
+    flex: 1;
+    background: var(--card-bg, #2a2a2a);
+    border: 1px solid var(--border-color, #3a3a3a);
+    border-radius: 4px;
+    padding: 5px 8px;
+    color: var(--text-color, #ddd);
+    font-size: 12px;
+    outline: none;
+}
+
+.ng-create-menu-search:focus {
+    border-color: var(--primary-color, #3b82f6);
+}
+
+.ng-create-menu-title {
+    padding: 6px 12px;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--text-color, #ddd);
+    border-bottom: 1px solid var(--border-color, #3a3a3a);
+    text-align: center;
+    letter-spacing: 0.3px;
+}
+
+.ng-create-menu-list {
+    overflow-y: auto;
+    flex: 1;
+    padding: 4px 0;
+}
+
+.ng-create-menu-category-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    color: var(--text-color, #ddd);
+    font-size: 13px;
+    transition: background 0.1s ease;
+}
+
+.ng-create-menu-category-header:hover {
+    background: var(--card-bg-hover, rgba(255, 255, 255, 0.05));
+}
+
+.ng-create-menu-cat-arrow {
+    font-size: 8px;
+    opacity: 0.6;
+    width: 10px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.ng-create-menu-items {
+    display: none;
+}
+
+.ng-cat-expanded > .ng-create-menu-items {
+    display: block;
+}
+
+.ng-create-menu-item {
+    padding: 5px 12px 5px 28px;
+    cursor: pointer;
+    color: var(--text-secondary, #aaa);
+    font-size: 12px;
+    transition: background 0.1s ease, color 0.1s ease;
+}
+
+.ng-create-menu-item:hover {
+    background: var(--primary-color, #3b82f6);
+    color: #fff;
+}
+
+/* Cyber-edge theme */
+
+[data-theme="cyber-edge"] .ng-create-menu {
+    background: rgba(26, 26, 24, 0.98);
+    border-color: rgba(144, 145, 140, 0.3);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 1px rgba(144, 145, 140, 0.3);
+}
+
+[data-theme="cyber-edge"] .ng-create-menu-search {
+    background: rgba(30, 30, 28, 0.9);
+    border-color: rgba(144, 145, 140, 0.3);
+    color: var(--text-color);
+}
+
+[data-theme="cyber-edge"] .ng-create-menu-search:focus {
+    border-color: var(--accent-primary);
+}
+
+[data-theme="cyber-edge"] .ng-create-menu-category-header:hover {
+    background: rgba(144, 145, 140, 0.1);
+}
+
+[data-theme="cyber-edge"] .ng-create-menu-item:hover {
+    background: var(--accent-primary);
+    color: #fff;
+}
+
+/* ---- Zoom Controls ---- */
+
+.ng-zoom-controls {
+    position: absolute;
+    top: 8px;
+    right: 42px;
+    display: flex;
+    gap: 2px;
+    opacity: 0.15;
+    transition: opacity 0.3s ease;
+    z-index: 30;
+}
+
+.ng-zoom-controls:hover {
+    opacity: 0.9;
+}
+
+.ng-zoom-btn {
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 0;
+    line-height: 1;
+    transition: all 0.2s ease;
+}
+
+.ng-zoom-btn:hover {
+    background: var(--card-bg-hover);
+    color: var(--text-primary);
+    border-color: var(--primary-color);
+}
+
+[data-theme="cyber-edge"] .ng-zoom-controls {
+    opacity: 0.12;
+}
+
+[data-theme="cyber-edge"] .ng-zoom-controls:hover {
+    opacity: 0.85;
+}
+
+[data-theme="cyber-edge"] .ng-zoom-btn {
+    background: rgba(30, 30, 28, 0.9);
+    border-color: rgba(144, 145, 140, 0.3);
+    color: rgba(144, 145, 140, 0.7);
+}
+
+[data-theme="cyber-edge"] .ng-zoom-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    background: rgba(43, 43, 41, 0.95);
+}
+
+[data-theme="cyber-edge"] .ng-node-title-input {
+    color: rgba(144, 145, 140, 0.9);
+    border-bottom-color: var(--accent-primary);
+}
+
+/* Popout window: no popout button, so zoom controls move to the edge */
+.graph-standalone .ng-zoom-controls {
+    right: 8px;
+}
+
+/* ---- Graph Standalone Page ---- */
+
+.graph-standalone {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.graph-standalone-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-color);
+    flex-shrink: 0;
+}
+
+.graph-standalone-header button {
+    padding: 6px 14px;
+    border: 1px solid var(--border-color);
+    background: var(--card-bg);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.graph-standalone-header button:hover {
+    background: var(--card-bg-hover);
+    border-color: var(--primary-color, #3b82f6);
+    color: var(--primary-color, #3b82f6);
+}
+
+.graph-standalone .node-graph-container {
+    flex: 1;
+}
+
+/* ---- Data Node Styles ---- */
+
+.ng-data-body {
+    padding: 8px 10px;
+}
+
+.ng-data-browse-btn {
+    width: 100%;
+    padding: 8px;
+    background: var(--card-bg, rgba(255,255,255,0.05));
+    border: 1px dashed var(--text-tertiary, rgba(255,255,255,0.25));
+    border-radius: 6px;
+    color: var(--text-secondary, rgba(255,255,255,0.7));
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.15s ease;
+}
+
+.ng-data-browse-btn:hover {
+    border-color: var(--primary-color, #3b82f6);
+    color: var(--primary-color, #3b82f6);
+    background: rgba(59, 130, 246, 0.08);
+}
+
+.ng-data-file-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    font-size: 11px;
+    color: var(--text-secondary, rgba(255,255,255,0.7));
+}
+
+.ng-data-file-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    background: var(--primary-color, #3b82f6);
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ng-data-file-icon::after {
+    content: '';
+    width: 8px;
+    height: 10px;
+    background: rgba(255,255,255,0.9);
+    clip-path: polygon(0 0, 60% 0, 100% 30%, 100% 100%, 0 100%);
+}
+
+.ng-data-file-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.ng-data-file-size {
+    flex-shrink: 0;
+    color: var(--text-tertiary, rgba(255,255,255,0.4));
+    font-size: 10px;
+}
+
+.ng-data-remove-btn {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary, rgba(255,255,255,0.4));
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 18px;
+    text-align: center;
+    border-radius: 3px;
+    padding: 0;
+    transition: all 0.15s ease;
+}
+
+.ng-data-remove-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+.ng-data-preview {
+    margin-top: 6px;
+    padding: 6px 8px;
+    background: var(--card-bg, rgba(0,0,0,0.2));
+    border-radius: 4px;
+    font-size: 10px;
+    line-height: 1.4;
+    color: var(--text-tertiary, rgba(255,255,255,0.5));
+    max-height: 80px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+
+/* Image node preview */
+.ng-image-preview {
+    width: 100%;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 6px;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+.ng-image-preview img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 4px;
+}
+
+/* Chat file preview - document type */
+.file-preview.document {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: var(--card-bg, rgba(255,255,255,0.05));
+    border-radius: 6px;
+    min-width: 80px;
+}
+
+.file-preview.document .file-icon {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.file-preview.document .doc-icon::after {
+    content: '';
+    width: 12px;
+    height: 14px;
+    background: var(--primary-color, #3b82f6);
+    clip-path: polygon(0 0, 60% 0, 100% 30%, 100% 100%, 0 100%);
+    display: block;
+}
+
+.file-preview .file-name {
+    font-size: 11px;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Cyber-edge theme: Data Node */
+
+[data-theme="cyber-edge"] .ng-data-browse-btn {
+    background: rgba(20, 20, 18, 0.6);
+    border-color: rgba(144, 145, 140, 0.3);
+    color: rgba(144, 145, 140, 0.8);
+}
+
+[data-theme="cyber-edge"] .ng-data-browse-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    background: rgba(144, 145, 140, 0.08);
+}
+
+[data-theme="cyber-edge"] .ng-data-file-icon {
+    background: var(--accent-primary);
+}
+
+[data-theme="cyber-edge"] .ng-data-preview {
+    background: rgba(20, 20, 18, 0.6);
+    border-color: rgba(144, 145, 140, 0.1);
+}
+
+[data-theme="cyber-edge"] .ng-image-preview {
+    border-color: rgba(144, 145, 140, 0.15);
+}

@@ -2,6 +2,9 @@ import argparse
 import os
 import json
 import sys
+import threading
+import subprocess
+import tempfile
 
 # Early GPU Configuration (MUST be before torch import)
 from utils.gpu_config import configure_gpu
@@ -30,19 +33,15 @@ try:
     from tools.base import get_tools_schema
     # Import adapters
     from tools.adapters import get_adapter_for_model, ToolResult
-    # Import tool router for 2-stage prompt system
-    from tools.tool_router import ToolRouter
     # Import to register tools
     import tools.biomni.bio_tools
     import tools.plan.plan_tools
     import tools.code.code_tools
     import tools.analysis.analysis_tools
     TOOLS_AVAILABLE = True
-    TOOL_ROUTER_AVAILABLE = True
 except ImportError as e:
     print(f"[Warning] Tool system not available: {e}")
     TOOLS_AVAILABLE = False
-    TOOL_ROUTER_AVAILABLE = False
     
     # Fallback stubs
     def set_adapter(model_type): pass
@@ -50,7 +49,6 @@ except ImportError as e:
     def get_tools_schema(): return []
     def get_adapter_for_model(model_type): return None
     class ToolResult: pass
-    class ToolRouter: pass
 
 # Optional: PIL for image processing
 try:
@@ -301,6 +299,9 @@ def generate_with_refusal_streaming(model, tokenizer, inputs, args):
     current_position = input_ids.shape[1]
     
     for step in range(args.max_length):
+        if global_stop_generation:
+            break
+        
         # Memory logging every 500 tokens
         if step > 0 and step % 500 == 0:
             kv_seq_len = past_key_values[0][0].shape[2] if past_key_values else 0
@@ -590,6 +591,64 @@ def print_available_models():
     print("="*50)
     print(f"\nUsage: python inference.py --model <model_name>")
     print()
+
+
+def _build_ref_context(step):
+    """Build reference context string from step's references."""
+    refs = step.get('references', [])
+    if not refs:
+        return ""
+    parts = ["\n\n[Reference Data]"]
+    for ref in refs:
+        if ref.get('nodeType') == 'data':
+            pv = ref.get('portValues', {}).get('out') or {}
+            if pv.get('textContent'):
+                parts.append(f"- {ref.get('title', 'Data')}: {pv['textContent'][:2000]}")
+            elif pv.get('uploadId'):
+                parts.append(f"- {ref.get('title', 'Data')}: file at /uploads/{pv['uploadId']}")
+        elif ref.get('nodeType') == 'image':
+            pv = ref.get('portValues', {}).get('out') or {}
+            if pv.get('uploadId'):
+                parts.append(
+                    f"- {ref.get('title', 'Image')}: Image file available. "
+                    f"Use view_image tool with image_path=\"/uploads/{pv['uploadId']}\" to analyze it."
+                )
+        else:
+            parts.append(f"- Refer to results from: {ref.get('title', '')}")
+    return "\n".join(parts)
+
+
+def _collect_step_images(step):
+    """Collect PIL Images from step's flow-connected image inputs.
+    
+    Used during plan execution to detect if a step (e.g. Composite node)
+    has image data flowing into it, enabling multimodal inference.
+    """
+    images = []
+    for port_name, input_data in step.get('inputs', {}).items():
+        if input_data.get('nodeType') == 'image':
+            pv = input_data.get('portValues', {}).get('out') or {}
+            upload_id = pv.get('uploadId')
+            if upload_id:
+                img_path = os.path.join(UPLOADS_DIR, upload_id)
+                if os.path.isfile(img_path):
+                    try:
+                        images.append(Image.open(img_path).convert('RGB'))
+                    except Exception as e:
+                        print(f"[Warning] Failed to load image {upload_id}: {e}")
+    return images
+
+
+def _build_step_inputs(step, history, system_prompt, tokenizer, args, tools_schema):
+    """Build model inputs for a plan step, using multimodal if images are present."""
+    step_images = _collect_step_images(step)
+    if step_images and global_processor is not None:
+        print(f"[DEBUG] Multimodal step detected: {len(step_images)} image(s)")
+        messages = build_multimodal_messages(history, "", step_images, system_prompt)
+        return build_inputs_multimodal(messages, step_images, global_processor, tokenizer, args)
+    else:
+        messages = build_messages(history, "", system_prompt)
+        return build_inputs(messages, tokenizer, args, tools=tools_schema)
 
 
 def load_tool_select_prompt():
@@ -1092,6 +1151,52 @@ def generate_response(model, tokenizer, inputs, args, streaming=True):
     return response.strip()
 
 
+def run_vision_inference(image_path: str, prompt: str = "Describe this image in detail.") -> str:
+    """Run multimodal inference on a single image. Returns text result.
+    
+    Called by the view_image tool. Uses the globally loaded model and processor.
+    
+    Args:
+        image_path: Path to image file (absolute, or relative like /uploads/filename)
+        prompt: Text prompt for image analysis
+    
+    Returns:
+        Generated text description
+        
+    Raises:
+        FileNotFoundError: If image file doesn't exist
+        RuntimeError: If vision encoder is not available
+    """
+    global global_model, global_processor, global_tokenizer, global_args, model_lock
+
+    if global_processor is None:
+        raise RuntimeError("Vision encoder not available. Text-only model loaded.")
+    if global_model is None:
+        raise RuntimeError("Model not loaded.")
+
+    # Resolve path: /uploads/filename -> UPLOADS_DIR/filename
+    if image_path.startswith('/uploads/'):
+        resolved = os.path.join(UPLOADS_DIR, image_path[len('/uploads/'):])
+    else:
+        resolved = image_path
+
+    if not os.path.isfile(resolved):
+        raise FileNotFoundError(f"Image file not found: {image_path}")
+
+    img = Image.open(resolved).convert('RGB')
+    images = [img]
+
+    messages = build_multimodal_messages([], prompt, images)
+    inputs = build_inputs_multimodal(
+        messages, images, global_processor, global_tokenizer, global_args
+    )
+
+    with model_lock:
+        response = generate_response(global_model, global_tokenizer, inputs, global_args, streaming=False)
+
+    return response
+
+
 def print_history(history):
     """
     Print conversation history.
@@ -1154,30 +1259,35 @@ def save_conversation(model_name, history, log_dir="inference_log"):
 
 def run_chat(model, tokenizer, model_name, system_prompt, args):
     """
-    Main chat loop.
+    Main chat loop with Agent/Plan mode support.
     """
+    cli_mode = 'agent'
+    
     print("\n" + "="*50)
     print(f"Chat with {model_name}")
     print("="*50)
     print("Commands:")
+    print("  /agent   - Switch to Agent mode (direct chat)")
+    print("  /plan    - Switch to Plan mode (tool routing)")
     print("  /clear   - Clear conversation history")
     print("  /history - Show conversation history")
     print("  /save    - Save conversation now")
     print("  /exit    - Save and quit")
-    print("="*50 + "\n")
+    print("="*50)
+    print(f"[Current mode: Agent]\n")
     
     conversation_history = []
     
     while True:
         try:
-            user_input = input("You: ").strip()
+            prompt_prefix = "[Agent]" if cli_mode == 'agent' else "[Plan]"
+            user_input = input(f"{prompt_prefix} You: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\n")
             save_conversation(model_name, conversation_history)
             print("Goodbye!")
             break
         
-        # Empty input
         if not user_input:
             continue
         
@@ -1200,24 +1310,62 @@ def run_chat(model, tokenizer, model_name, system_prompt, args):
             save_conversation(model_name, conversation_history)
             continue
         
-        # Build tokenized inputs with chat template when available
-        messages = build_messages(conversation_history, user_input, system_prompt)
-        inputs = build_inputs(messages, tokenizer, args)
+        if user_input == '/agent':
+            cli_mode = 'agent'
+            print("[Switched to Agent mode]\n")
+            continue
+        
+        if user_input == '/plan':
+            cli_mode = 'plan'
+            print("[Switched to Plan mode]\n")
+            continue
+        
+        # Determine tools based on mode
+        tools_schema = None
+        current_sys_prompt = system_prompt
+        
+        if cli_mode == 'plan':
+            plan_prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "PLAN_SYSTEM_PROMPT.txt")
+            if os.path.exists(plan_prompt_path):
+                with open(plan_prompt_path, "r", encoding="utf-8") as f:
+                    current_sys_prompt = f.read().strip()
+            if TOOLS_AVAILABLE:
+                from tools.base import get_plan_schema
+                tools_schema = get_plan_schema()
+        
+        # Build tokenized inputs
+        messages = build_messages(conversation_history, user_input, current_sys_prompt)
+        inputs = build_inputs(messages, tokenizer, args, tools=tools_schema)
         
         # Generate response with streaming
         try:
-            # Print prefix before streaming starts
             print("\nAssistant: ", end="", flush=True)
-            
-            # Generate with streaming (tokens printed in real-time)
             response = generate_response(model, tokenizer, inputs, args, streaming=True)
-            
-            # Add newline after streaming completes
             print()
             
-            # Update history
             conversation_history.append({"role": "user", "content": user_input})
             conversation_history.append({"role": "assistant", "content": response})
+            
+            # In plan mode, check for tool calls in response
+            if cli_mode == 'plan' and tools_schema and '[TOOL_CALLS]' in response:
+                try:
+                    tool_call_text = response.split('[TOOL_CALLS]', 1)[1].strip()
+                    import re
+                    tool_calls = re.findall(r'\{[^{}]+\}', tool_call_text)
+                    for tc_str in tool_calls:
+                        tc = json.loads(tc_str)
+                        tool_name = tc.get('name', '')
+                        tool_args = tc.get('arguments', {})
+                        print(f"\n[Tool Call: {tool_name}]")
+                        if tool_name == 'create_plan':
+                            goal = tool_args.get('goal', '')
+                            steps = tool_args.get('steps', [])
+                            print(f"Goal: {goal}")
+                            for i, step in enumerate(steps, 1):
+                                print(f"  {i}. {step.get('name', '')} [{step.get('tool', '')}]")
+                            print()
+                except Exception as e:
+                    print(f"\n[Tool parse error: {e}]")
             
         except Exception as e:
             print(f"\n[Error generating response: {e}]\n")
@@ -1234,13 +1382,184 @@ global_tokenizer = None
 global_processor = None  # For multimodal input processing
 global_args = None
 global_system_prompt = None
-global_tool_router = None  # For 2-stage prompt system
 global_model_name = None
-global_model_type = None  # For tool router
 global_stop_generation = False
+model_lock = threading.RLock()
 
 INFERENCE_UI_DIR = os.path.join(os.path.dirname(__file__), "inference_ui")
 LOGS_DIR = os.path.join(INFERENCE_UI_DIR, "logs")
+UPLOADS_DIR = os.path.join(INFERENCE_UI_DIR, "uploads")
+OUTPUTS_DIR = os.path.join(INFERENCE_UI_DIR, "outputs")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+os.makedirs(OUTPUTS_DIR, exist_ok=True)
+
+
+def _execute_code_subprocess(code, language, conv_id, step_index):
+    """Execute Python/R code via subprocess and capture stdout, stderr, figures, tables.
+
+    This is a pure function with no HTTP or model_lock dependencies.
+    The caller is responsible for any locking if needed.
+    """
+    out_dir = os.path.join(OUTPUTS_DIR, str(conv_id), f'step_{step_index}')
+    out_dir = out_dir.replace('\\', '/')
+    os.makedirs(out_dir, exist_ok=True)
+
+    if language == 'r':
+        ext = '.R'
+        cmd_prefix = ['Rscript']
+        preamble = ''
+        postamble = ''
+    else:
+        ext = '.py'
+        cmd_prefix = [sys.executable]
+        preamble = (
+            "import matplotlib as _mpl\n"
+            "_mpl.use('Agg')\n"
+            "import matplotlib.pyplot as _plt\n"
+            f"_out_dir = {repr(out_dir)}\n"
+            "_fig_count = [0]\n"
+            "_orig_show = _plt.show\n"
+            "def _patched_show(*a, **kw):\n"
+            "    _fig_count[0] += 1\n"
+            "    _plt.savefig(f'{_out_dir}/fig_{_fig_count[0]}.png', dpi=100, bbox_inches='tight')\n"
+            "    _plt.close('all')\n"
+            "_plt.show = _patched_show\n"
+        )
+        postamble = (
+            "\n# --- auto-save cleanup ---\n"
+            "import matplotlib.pyplot as _plt2\n"
+            "if _plt2.get_fignums():\n"
+            "    _fig_count[0] += 1\n"
+            "    _plt2.savefig(f'{_out_dir}/fig_{_fig_count[0]}.png', dpi=100, bbox_inches='tight')\n"
+            "    _plt2.close('all')\n"
+            "try:\n"
+            "    import pandas as _pd\n"
+            "    _tbl_count = 0\n"
+            "    for _vname, _vval in list(locals().items()):\n"
+            "        if isinstance(_vval, _pd.DataFrame) and not _vname.startswith('_'):\n"
+            "            _tbl_count += 1\n"
+            "            _vval.to_csv(f'{_out_dir}/table_{_tbl_count}.csv', index=False)\n"
+            "except ImportError:\n"
+            "    pass\n"
+        )
+
+    full_code = preamble + code + postamble
+    tmp_file = None
+    try:
+        tmp_file = tempfile.NamedTemporaryFile(mode='w', suffix=ext, delete=False, encoding='utf-8')
+        tmp_file.write(full_code)
+        tmp_file.close()
+
+        proc = subprocess.run(
+            cmd_prefix + [tmp_file.name],
+            capture_output=True, text=True, timeout=60,
+            cwd=out_dir
+        )
+
+        stdout = proc.stdout or ''
+        stderr = proc.stderr or ''
+        success = proc.returncode == 0
+    except subprocess.TimeoutExpired:
+        stdout = ''
+        stderr = 'Code execution timed out (60s limit)'
+        success = False
+    except Exception as e:
+        stdout = ''
+        stderr = str(e)
+        success = False
+    finally:
+        if tmp_file and os.path.exists(tmp_file.name):
+            os.unlink(tmp_file.name)
+
+    figures = []
+    tables = []
+    if os.path.isdir(out_dir):
+        for f in sorted(os.listdir(out_dir)):
+            url = f'/api/outputs/{conv_id}/step_{step_index}/{f}'
+            if f.endswith('.png'):
+                figures.append(url)
+            elif f.endswith('.csv'):
+                tables.append(url)
+
+    return {
+        'success': success,
+        'stdout': stdout,
+        'stderr': stderr,
+        'figures': figures,
+        'tables': tables
+    }
+
+
+def _extract_text_from_file(filepath, filename):
+    """Extract readable text from uploaded files with graceful library fallback."""
+    ext = os.path.splitext(filename)[1].lower()
+
+    if ext in ('.csv', '.xml', '.json', '.txt'):
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                return f.read(), 'raw'
+        except Exception:
+            return f'[Failed to read {filename}]', 'error'
+
+    if ext == '.pdf':
+        try:
+            import fitz
+            doc = fitz.open(filepath)
+            pages = [page.get_text() for page in doc]
+            doc.close()
+            return '\n\n--- Page Break ---\n\n'.join(pages), 'pymupdf'
+        except ImportError:
+            return f'[PDF file: {filename} - install PyMuPDF for text extraction]', 'unavailable'
+        except Exception as e:
+            return f'[PDF read error: {e}]', 'error'
+
+    if ext in ('.doc', '.docx'):
+        try:
+            from docx import Document
+            doc = Document(filepath)
+            text = '\n'.join(p.text for p in doc.paragraphs if p.text)
+            return text, 'python-docx'
+        except ImportError:
+            return f'[Word file: {filename} - install python-docx for text extraction]', 'unavailable'
+        except Exception as e:
+            return f'[Word read error: {e}]', 'error'
+
+    if ext in ('.xlsx', '.xls'):
+        try:
+            from openpyxl import load_workbook
+            wb_f = load_workbook(filepath, data_only=False)
+            wb_v = load_workbook(filepath, data_only=True)
+            sheets_text = []
+            for sname in wb_f.sheetnames:
+                ws_f = wb_f[sname]
+                ws_v = wb_v[sname]
+                if ws_f.max_row is None or ws_f.max_column is None:
+                    continue
+                rows = []
+                for r in range(1, ws_f.max_row + 1):
+                    row = []
+                    for c in range(1, ws_f.max_column + 1):
+                        fval = ws_f.cell(r, c).value
+                        cval = ws_v.cell(r, c).value
+                        if isinstance(fval, str) and fval.startswith('='):
+                            row.append(f'{cval} [{fval}]' if cval is not None else f'[{fval}]')
+                        else:
+                            row.append(str(fval) if fval is not None else '')
+                    rows.append(row)
+                if rows:
+                    header = '| ' + ' | '.join(rows[0]) + ' |'
+                    sep = '| ' + ' | '.join('---' for _ in rows[0]) + ' |'
+                    body_lines = ['| ' + ' | '.join(r) + ' |' for r in rows[1:]]
+                    sheets_text.append(f'## {sname}\n{header}\n{sep}\n' + '\n'.join(body_lines))
+            wb_f.close()
+            wb_v.close()
+            return '\n\n'.join(sheets_text), 'openpyxl'
+        except ImportError:
+            return f'[Excel file: {filename} - install openpyxl for text extraction]', 'unavailable'
+        except Exception as e:
+            return f'[Excel read error: {e}]', 'error'
+
+    return f'[Unsupported format: {ext}]', 'unsupported'
 
 
 class ConversationManager:
@@ -1249,9 +1568,22 @@ class ConversationManager:
     def __init__(self, logs_dir):
         self.logs_dir = logs_dir
         os.makedirs(logs_dir, exist_ok=True)
+        self._list_cache = None
+        self._list_cache_mtime = 0
+    
+    def _invalidate_cache(self):
+        self._list_cache = None
     
     def list_conversations(self):
-        """List all conversations."""
+        """List all conversations (cached, re-reads only when directory changes)."""
+        try:
+            dir_mtime = os.path.getmtime(self.logs_dir)
+        except OSError:
+            dir_mtime = 0
+        
+        if self._list_cache is not None and dir_mtime <= self._list_cache_mtime:
+            return self._list_cache
+        
         conversations = []
         for filename in os.listdir(self.logs_dir):
             if filename.endswith('.json'):
@@ -1270,6 +1602,8 @@ class ConversationManager:
         
         # Sort by updated_at descending
         conversations.sort(key=lambda x: x.get('updated_at', ''), reverse=True)
+        self._list_cache = conversations
+        self._list_cache_mtime = dir_mtime
         return conversations
     
     def get_conversation(self, conv_id):
@@ -1300,12 +1634,14 @@ class ConversationManager:
         filepath = os.path.join(self.logs_dir, f"{conv_id}.json")
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        self._invalidate_cache()
     
     def delete_conversation(self, conv_id):
         """Delete a conversation."""
         filepath = os.path.join(self.logs_dir, f"{conv_id}.json")
         if os.path.exists(filepath):
             os.remove(filepath)
+            self._invalidate_cache()
             return True
         return False
     
@@ -1356,6 +1692,23 @@ class ConversationManager:
             return True
         return False
     
+    def replace_last_plan_message(self, conv_id, new_content):
+        """Replace the last [TOOL_CALLS]...create_plan message with new content.
+        Used to replace the initial create_plan message with [PLAN_COMPLETE] data,
+        preventing duplicate plan boxes in the chat."""
+        data = self.get_conversation(conv_id)
+        if not data:
+            return False
+        messages = data.get('messages', [])
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
+            content = msg.get('content') or ''
+            if msg.get('role') == 'assistant' and '[TOOL_CALLS]' in content and 'create_plan' in content:
+                msg['content'] = new_content
+                self.save_conversation(conv_id, data)
+                return True
+        return False
+
     def clear_conversation(self, conv_id):
         """Clear messages in a conversation."""
         data = self.get_conversation(conv_id)
@@ -1364,6 +1717,31 @@ class ConversationManager:
             data['title'] = 'New Chat'
             self.save_conversation(conv_id, data)
             return True
+        return False
+
+    def update_plan_analysis(self, conv_id, analysis_text):
+        """Append analysis text to the last PLAN_COMPLETE message in a conversation."""
+        data = self.get_conversation(conv_id)
+        if not data:
+            return False
+        messages = data.get('messages', [])
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
+            if msg.get('role') == 'assistant' and '[PLAN_COMPLETE]' in (msg.get('content') or ''):
+                content = msg['content']
+                match_idx = content.find('[PLAN_COMPLETE]')
+                if match_idx == -1:
+                    continue
+                json_str = content[match_idx + len('[PLAN_COMPLETE]'):].strip()
+                try:
+                    plan_json = json.loads(json_str)
+                    plan_json['analysis'] = analysis_text
+                    prefix = content[:match_idx]
+                    msg['content'] = prefix + '[PLAN_COMPLETE]' + json.dumps(plan_json, ensure_ascii=False)
+                    self.save_conversation(conv_id, data)
+                    return True
+                except json.JSONDecodeError:
+                    return False
         return False
 
 
@@ -1420,8 +1798,53 @@ class InferenceChatHandler(BaseHTTPRequestHandler):
             self.serve_static_file(os.path.join(INFERENCE_UI_DIR, 'style.css'))
         elif path == '/app.js':
             self.serve_static_file(os.path.join(INFERENCE_UI_DIR, 'app.js'))
+        elif path == '/graph.html':
+            self.serve_static_file(os.path.join(INFERENCE_UI_DIR, 'graph.html'))
+        elif path == '/node-graph.js':
+            self.serve_static_file(os.path.join(INFERENCE_UI_DIR, 'node-graph.js'))
+        elif path == '/node-graph.css':
+            self.serve_static_file(os.path.join(INFERENCE_UI_DIR, 'node-graph.css'))
+        elif path == '/i18n.js':
+            self.serve_static_file(os.path.join(INFERENCE_UI_DIR, 'i18n.js'))
+        elif path.startswith('/language/') and path.endswith('.json'):
+            safe_name = os.path.basename(path)
+            self.serve_static_file(os.path.join(INFERENCE_UI_DIR, 'language', safe_name))
+        elif path.startswith('/nodes/') and path.endswith('.js'):
+            safe_path = os.path.normpath(path.lstrip('/'))
+            full_path = os.path.join(INFERENCE_UI_DIR, safe_path)
+            if os.path.commonpath([INFERENCE_UI_DIR, full_path]) == INFERENCE_UI_DIR:
+                self.serve_static_file(full_path, 'application/javascript')
+            else:
+                self.send_error(403, 'Forbidden')
+        
+        elif path.startswith('/lib/') and (path.endswith('.js') or path.endswith('.css')):
+            safe_path = os.path.normpath(path.lstrip('/'))
+            full_path = os.path.join(INFERENCE_UI_DIR, safe_path)
+            if os.path.commonpath([INFERENCE_UI_DIR, full_path]) == INFERENCE_UI_DIR:
+                self.serve_static_file(full_path)
+            else:
+                self.send_error(403, 'Forbidden')
         
         # API endpoints
+        elif path == '/api/node-manifest':
+            nodes_dir = os.path.join(INFERENCE_UI_DIR, 'nodes')
+            helpers = []
+            nodes = []
+            for root, _dirs, files in os.walk(nodes_dir):
+                for f in files:
+                    if not f.endswith('.js'):
+                        continue
+                    if f == 'node-registry.js':
+                        continue
+                    rel = os.path.relpath(os.path.join(root, f), INFERENCE_UI_DIR).replace('\\', '/')
+                    if f.endswith('-helper.js') or f.endswith('-util.js'):
+                        helpers.append(rel)
+                    else:
+                        nodes.append(rel)
+            helpers.sort()
+            nodes.sort()
+            self.send_json({'files': helpers + nodes})
+        
         elif path == '/api/model':
             self.send_json({'model': global_model_name})
         
@@ -1447,6 +1870,51 @@ class InferenceChatHandler(BaseHTTPRequestHandler):
                 'top_k': global_args.top_k,
                 'max_context': global_args.max_context
             })
+        
+        elif path == '/api/data/list':
+            file_list = []
+            if os.path.isdir(UPLOADS_DIR):
+                for fname in os.listdir(UPLOADS_DIR):
+                    if fname.endswith('.extracted.txt'):
+                        continue
+                    fpath = os.path.join(UPLOADS_DIR, fname)
+                    if os.path.isfile(fpath):
+                        file_list.append({
+                            'name': fname,
+                            'size': os.path.getsize(fpath),
+                            'mtime': os.path.getmtime(fpath)
+                        })
+            file_list.sort(key=lambda x: x['mtime'], reverse=True)
+            self.send_json(file_list)
+        
+        elif path.startswith('/uploads/'):
+            fname = os.path.basename(path)
+            fpath = os.path.join(UPLOADS_DIR, fname)
+            if os.path.commonpath([UPLOADS_DIR, os.path.abspath(fpath)]) == UPLOADS_DIR and os.path.isfile(fpath):
+                self.serve_static_file(fpath)
+            else:
+                self.send_error(404, 'File not found')
+        
+        elif path.startswith('/api/outputs/'):
+            rel = path[len('/api/outputs/'):]
+            parts = rel.strip('/').split('/')
+            if len(parts) == 3:
+                full = os.path.normpath(os.path.join(OUTPUTS_DIR, *parts))
+                if os.path.commonpath([OUTPUTS_DIR, full]) == OUTPUTS_DIR and os.path.isfile(full):
+                    ct = 'image/png' if full.endswith('.png') else 'text/csv' if full.endswith('.csv') else 'application/octet-stream'
+                    self.serve_static_file(full, ct)
+                else:
+                    self.send_error(404, 'File not found')
+            elif len(parts) == 2:
+                step_dir = os.path.normpath(os.path.join(OUTPUTS_DIR, parts[0], parts[1]))
+                if os.path.commonpath([OUTPUTS_DIR, step_dir]) == OUTPUTS_DIR and os.path.isdir(step_dir):
+                    figs = sorted([f'/api/outputs/{parts[0]}/{parts[1]}/{f}' for f in os.listdir(step_dir) if f.endswith('.png')])
+                    tbls = sorted([f'/api/outputs/{parts[0]}/{parts[1]}/{f}' for f in os.listdir(step_dir) if f.endswith('.csv')])
+                    self.send_json({'figures': figs, 'tables': tbls})
+                else:
+                    self.send_json({'figures': [], 'tables': []})
+            else:
+                self.send_error(404, 'Not found')
         
         else:
             self.send_error(404, 'Not found')
@@ -1527,6 +1995,66 @@ class InferenceChatHandler(BaseHTTPRequestHandler):
         elif path == '/api/tool_call':
             self.handle_direct_tool_call(data)
         
+        elif path == '/api/replan':
+            self.handle_replan(data)
+        
+        elif path == '/api/update_plan_analysis':
+            conv_id = data.get('conversation_id')
+            analysis = data.get('analysis', '')
+            if conv_id and conversation_manager.update_plan_analysis(conv_id, analysis):
+                self.send_json({'success': True})
+            else:
+                self.send_error_json('Failed to update plan analysis', 400)
+        
+        elif path == '/api/execute_code':
+            self.handle_execute_code(data)
+        
+        elif path == '/api/data/upload':
+            file_name = data.get('name', 'unknown')
+            file_data = data.get('data', '')
+            if not file_data:
+                self.send_error_json('No file data provided', 400)
+                return
+            # Sanitize filename
+            safe_name = os.path.basename(file_name).replace('..', '_')
+            safe_name = re.sub(r'[<>:"/\\|?*]', '_', safe_name)
+            if not safe_name:
+                safe_name = 'upload'
+            # Handle duplicates
+            base, ext = os.path.splitext(safe_name)
+            dest = os.path.join(UPLOADS_DIR, safe_name)
+            counter = 1
+            while os.path.exists(dest):
+                safe_name = f'{base}_{counter}{ext}'
+                dest = os.path.join(UPLOADS_DIR, safe_name)
+                counter += 1
+            try:
+                raw = base64.b64decode(file_data.split(',', 1)[1]) if ',' in file_data else base64.b64decode(file_data)
+                with open(dest, 'wb') as f:
+                    f.write(raw)
+            except Exception as e:
+                self.send_error_json(f'Failed to save file: {e}', 500)
+                return
+            # Extract text for non-image files
+            text_content = None
+            extraction_method = None
+            is_image = ext.lower() in ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico')
+            if not is_image:
+                text_content, extraction_method = _extract_text_from_file(dest, safe_name)
+                txt_path = dest + '.extracted.txt'
+                try:
+                    with open(txt_path, 'w', encoding='utf-8') as f:
+                        f.write(text_content or '')
+                except Exception:
+                    pass
+            self.send_json({
+                'fileName': safe_name,
+                'fileSize': os.path.getsize(dest),
+                'uploadId': safe_name,
+                'textContent': text_content,
+                'extractionMethod': extraction_method
+            })
+        
         else:
             self.send_error_json('Not found', 404)
     
@@ -1542,6 +2070,23 @@ class InferenceChatHandler(BaseHTTPRequestHandler):
                 self.send_json({'success': True})
             else:
                 self.send_error_json('Conversation not found', 404)
+        elif path.startswith('/api/data/'):
+            fname = os.path.basename(path)
+            fpath = os.path.join(UPLOADS_DIR, fname)
+            if os.path.commonpath([UPLOADS_DIR, os.path.abspath(fpath)]) != UPLOADS_DIR:
+                self.send_error_json('Invalid path', 400)
+                return
+            deleted = False
+            if os.path.isfile(fpath):
+                os.remove(fpath)
+                deleted = True
+            txt_path = fpath + '.extracted.txt'
+            if os.path.isfile(txt_path):
+                os.remove(txt_path)
+            if deleted:
+                self.send_json({'success': True})
+            else:
+                self.send_error_json('File not found', 404)
         else:
             self.send_error_json('Not found', 404)
     
@@ -1552,6 +2097,22 @@ class InferenceChatHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
     
+    def handle_execute_code(self, data):
+        """Execute Python/R code and capture figures + tables."""
+        code = data.get('code', '')
+        language = data.get('language', 'python').lower()
+        conv_id = data.get('conv_id', 'default')
+        step_index = data.get('step_index', 0)
+
+        if not code.strip():
+            self.send_json({'success': False, 'error': 'Empty code', 'stdout': '', 'stderr': '', 'figures': [], 'tables': []})
+            return
+
+        with model_lock:
+            result = _execute_code_subprocess(code, language, conv_id, step_index)
+
+        self.send_json(result)
+
     def handle_step_question(self, data):
         """Handle question about a specific step - stream LLM response."""
         global global_model, global_tokenizer, global_args
@@ -1663,6 +2224,49 @@ You may suggest plan modifications or new steps if needed."""
         except Exception as e:
             self.wfile.write(f"data: {json.dumps({'error': str(e)})}\n\n".encode('utf-8'))
             self.wfile.flush()
+    
+    def handle_replan(self, data):
+        """Handle re-planning from modified graph structure."""
+        conv_id = data.get('conversation_id')
+        new_steps = data.get('steps', [])
+        goal = data.get('goal', '')
+        rerun = data.get('rerun', False)
+        
+        if not new_steps:
+            self.send_error_json('No steps provided', 400)
+            return
+        
+        if not hasattr(self, '_plan_state'):
+            self._plan_state = {}
+        
+        if rerun:
+            self._plan_state['all_results'] = []
+            self._plan_state['current_step'] = 0
+        
+        completed_step_ids = set()
+        if not rerun and self._plan_state.get('all_results'):
+            for r in self._plan_state['all_results']:
+                completed_step_ids.add(str(r.get('step_num', '')))
+        
+        rebuilt_steps = []
+        for step in new_steps:
+            step_entry = {
+                'name': step.get('name', ''),
+                'tool': step.get('tool', ''),
+                'description': step.get('description', ''),
+                'depends_on': step.get('depends_on', []),
+                'references': step.get('references', []),
+                'inputs': step.get('inputs', {})
+            }
+            rebuilt_steps.append(step_entry)
+        
+        self._plan_state['steps'] = rebuilt_steps
+        if goal:
+            self._plan_state['goal'] = goal
+        if not rerun:
+            self._plan_state['current_step'] = len(completed_step_ids)
+        
+        self.send_json({'success': True, 'steps': len(rebuilt_steps), 'completed': len(completed_step_ids)})
     
     def handle_retry_step(self, data):
         """Handle retry of a specific step - LLM regenerates from tool select."""
@@ -1785,8 +2389,8 @@ Select and execute the appropriate tool."""
                 self.send_error_json(f'Tool "{tool_name}" not found', 404)
                 return
             
-            # Execute the tool
-            result = tool.execute(**args)
+            with model_lock:
+                result = tool.execute(**args)
             
             self.send_json({
                 'success': result.get('success', True),
@@ -1822,30 +2426,51 @@ Select and execute the appropriate tool."""
         for f in files:
             file_type = f.get('type')
             file_name = f.get('name', 'unknown')
-            file_data = f.get('data', '')
-            
+
             if file_type == 'image':
-                # Store image data for multimodal processing
-                processed_files.append({
-                    'type': 'image',
-                    'name': file_name,
-                    'data': file_data
-                })
+                upload_id = f.get('uploadId')
+                if upload_id:
+                    processed_files.append({
+                        'type': 'image',
+                        'name': file_name,
+                        'uploadId': upload_id
+                    })
+                else:
+                    processed_files.append({
+                        'type': 'image',
+                        'name': file_name,
+                        'data': f.get('data', '')
+                    })
                 file_descriptions.append(f"[Image: {file_name}]")
+            elif file_type == 'document':
+                text_content = f.get('textContent', '')
+                processed_files.append({
+                    'type': 'document',
+                    'name': file_name,
+                    'uploadId': f.get('uploadId'),
+                    'textContent': text_content
+                })
+                file_descriptions.append(f"[Document: {file_name}]")
             elif file_type == 'audio':
-                # Store audio data (for future multimodal support)
                 processed_files.append({
                     'type': 'audio',
                     'name': file_name,
-                    'data': file_data
+                    'data': f.get('data', '')
                 })
                 file_descriptions.append(f"[Audio: {file_name}]")
         
-        # Build full message content
+        # Build full message content with document context
+        doc_context = []
+        for f in processed_files:
+            if f['type'] == 'document' and f.get('textContent'):
+                doc_context.append(f"--- {f['name']} ---\n{f['textContent']}")
+
         full_message = message
+        if doc_context:
+            full_message = '\n\n'.join(doc_context) + '\n\n' + full_message
         if file_descriptions:
             file_header = ' '.join(file_descriptions)
-            full_message = file_header + ('\n' + message if message else '')
+            full_message = file_header + ('\n' + full_message if full_message else '')
         
         # Add user message (with file references)
         conversation_manager.add_message(conv_id, 'user', full_message, files=processed_files)
@@ -1875,36 +2500,44 @@ Select and execute the appropriate tool."""
             # Extract images from processed files
             images = []
             for f in processed_files:
-                if f['type'] == 'image' and f.get('data'):
+                if f['type'] == 'image':
                     try:
-                        img = process_image_from_base64(f['data'])
-                        images.append(img)
+                        if f.get('uploadId'):
+                            img_path = os.path.join(UPLOADS_DIR, f['uploadId'])
+                            if os.path.isfile(img_path):
+                                img = Image.open(img_path).convert('RGB')
+                                images.append(img)
+                            else:
+                                print(f"[Warning] Upload file not found: {f['uploadId']}")
+                        elif f.get('data'):
+                            img = process_image_from_base64(f['data'])
+                            images.append(img)
                     except Exception as e:
                         print(f"[Warning] Failed to process image: {e}")
             
-            # 2-stage prompt system: Route to determine if tools are needed
-            use_tools = True  # Default: use tools
+            # Mode-based tool routing
+            mode = data.get('mode', 'agent')
+            use_tools = True
             current_system_prompt = global_system_prompt
             
-            if global_tool_router is not None:
-                try:
-                    use_tools, current_system_prompt = global_tool_router.route(message)
-                    print(f"[DEBUG] Tool Router result: use_tools={use_tools}")
-                    print(f"[DEBUG] System prompt preview: {current_system_prompt[:100]}...")
-                except Exception as e:
-                    print(f"[Warning] Tool router failed, using default: {e}")
-                    use_tools = True
-                    current_system_prompt = global_system_prompt
-            
-            # Get tools schema - use only create_plan for plan creation mode
-            if TOOLS_AVAILABLE and use_tools:
-                from tools.base import get_plan_schema
-                tools_schema = get_plan_schema()  # Only create_plan tool
-            else:
+            if mode == 'agent':
+                # Agent mode: no tool routing, plain chat
+                use_tools = False
                 tools_schema = None
+                print(f"[DEBUG] Agent mode: tools disabled")
+            else:
+                # Plan mode: load plan system prompt and enable tools
+                plan_prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "PLAN_SYSTEM_PROMPT.txt")
+                if os.path.exists(plan_prompt_path):
+                    with open(plan_prompt_path, "r", encoding="utf-8") as f:
+                        current_system_prompt = f.read().strip()
+                if TOOLS_AVAILABLE:
+                    from tools.base import get_plan_schema
+                    tools_schema = get_plan_schema()
+                else:
+                    tools_schema = None
             
             # Build inputs (multimodal if images present)
-            # When router says YES, inject [TOOL_CALLS] token at the end
             if images and global_processor is not None:
                 messages = build_multimodal_messages(history, message, images, current_system_prompt)
                 inputs = build_inputs_multimodal(messages, images, global_processor, global_tokenizer, global_args)
@@ -1917,6 +2550,7 @@ Select and execute the appropriate tool."""
             max_tool_iterations = 10  # Prevent infinite loops
             tool_iteration = 0
             
+            model_lock.acquire()
             while tool_iteration < max_tool_iterations:
                 tool_iteration += 1
                 
@@ -2101,6 +2735,11 @@ Select and execute the appropriate tool."""
                                 self.wfile.write(f"data: {json.dumps({'tool_call': {'name': call['name'], 'arguments': call['arguments'], 'status': 'running'}})}\n\n".encode('utf-8'))
                                 self.wfile.flush()
                                 
+                                # Pass conv_id/step_index to code_gen for auto-execution
+                                if call['name'] == 'code_gen' and hasattr(self, '_plan_state') and self._plan_state.get('steps'):
+                                    call['arguments']['conv_id'] = conv_id
+                                    call['arguments']['step_index'] = self._plan_state.get('current_step', 0)
+                                
                                 # Execute the tool
                                 result = execute_tool_call(call['name'], call['arguments'])
                                 
@@ -2173,13 +2812,17 @@ Select and execute the appropriate tool."""
                                     current_system_prompt = load_tool_select_prompt()
                                     # Add step context for first step
                                     step = plan_steps[0]
-                                    step_context = f"Execute step 1: {step.get('name', '')}. {step.get('description', '')} Choose and call the appropriate tool(s)."
+                                    ref_ctx = _build_ref_context(step)
+                                    step_context = f"Execute step 1: {step.get('name', '')}. {step.get('description', '')}{ref_ctx} Choose and call the appropriate tool(s)."
                                     history.append({'role': 'user', 'content': step_context})
                                     
                                     # Send step_start event to UI (tool will be determined at execution time)
                                     self.wfile.write(f"data: {json.dumps({'step_start': {'step': 1}})}\n\n".encode('utf-8'))
                                     self.wfile.flush()
-                                    response_saved = True  # Don't save create_plan tool call response (only save PLAN_COMPLETE)
+                                    # Save the create_plan tool call so the plan can be restored if the user navigates away
+                                    if full_response.strip():
+                                        conversation_manager.add_message(conv_id, 'assistant', full_response.strip())
+                                    response_saved = True
                             else:
                                 # Normal tool execution - check if we're in plan execution mode
                                 if hasattr(self, '_plan_state') and self._plan_state.get('steps'):
@@ -2193,14 +2836,18 @@ Select and execute the appropriate tool."""
                                         
                                         # Store full result data including thought, action, and result
                                         res_data = result.get('result', {})
-                                        self._plan_state['all_results'].append({
+                                        result_entry = {
                                             'step': step_idx + 1,
                                             'tool': call['name'],
                                             'success': result.get('success', False),
                                             'thought': result.get('thought', ''),
                                             'action': result.get('action', ''),
+                                            'error': result.get('error', ''),
                                             'result': res_data if isinstance(res_data, dict) else {'title': str(res_data)[:200]}
-                                        })
+                                        }
+                                        if global_stop_generation:
+                                            result_entry['stopped'] = True
+                                        self._plan_state['all_results'].append(result_entry)
                                     
                                     # Move to next step
                                     self._plan_state['current_step'] += 1
@@ -2208,8 +2855,8 @@ Select and execute the appropriate tool."""
                                     steps = self._plan_state['steps']
                                     if step_idx < len(steps):
                                         step = steps[step_idx]
-                                        step_context = f"Execute step {step_idx + 1}: {step.get('name', '')}. {step.get('description', '')} Choose and call the appropriate tool(s)."
-                                        # Add tool result and step context
+                                        ref_ctx = _build_ref_context(step)
+                                        step_context = f"Execute step {step_idx + 1}: {step.get('name', '')}. {step.get('description', '')}{ref_ctx} Choose and call the appropriate tool(s)."
                                         tool_context = "\n\n".join([format_tool_result_for_llm(item['result']) for item in tool_results])
                                         history.append({'role': 'user', 'content': f"Tool result:\n{tool_context}\n\n{step_context}"})
                                         
@@ -2224,20 +2871,16 @@ Select and execute the appropriate tool."""
                                             'results': self._plan_state.get('all_results', [])
                                         }
                                         plan_complete_msg = f"[PLAN_COMPLETE]{json.dumps(plan_complete_data, ensure_ascii=False)}"
-                                        conversation_manager.add_message(conv_id, 'assistant', plan_complete_msg)
-                                        response_saved = True  # Only save plan result, prevent full_response duplication
+                                        if not conversation_manager.replace_last_plan_message(conv_id, plan_complete_msg):
+                                            conversation_manager.add_message(conv_id, 'assistant', plan_complete_msg)
+                                        response_saved = True
                                         
-                                        self._plan_state = {}  # Clear plan state
-                                        
-                                        # Save response to DB
-                                        if full_response.strip() and not response_saved:
-                                            conversation_manager.add_message(conv_id, 'assistant', full_response.strip())
-                                            response_saved = True
+                                        self._plan_state = {}
                                         
                                         # Send done event WITH plan results
                                         self.wfile.write(f"data: {json.dumps({'done': True, 'plan_complete': plan_complete_data})}\n\n".encode('utf-8'))
                                         self.wfile.flush()
-                                        break  # Exit generation loop - all plan steps completed
+                                        break
                                 else:
                                     current_system_prompt = global_system_prompt
                                     # Add tool results using adapter format (or fallback)
@@ -2258,15 +2901,24 @@ Select and execute the appropriate tool."""
                                         history.append({'role': 'user', 'content': f"Tool results:\n{tool_context}\n\nNow call the next tool. Output ONLY a tool call, no text."})
                         
                         # Save tool call response to DB before resetting
+                        # Skip during plan execution - intermediate tool calls are not user-facing
                         if full_response.strip() and not response_saved:
-                            conversation_manager.add_message(conv_id, 'assistant', full_response.strip())
-                            response_saved = True
+                            if not (hasattr(self, '_plan_state') and self._plan_state.get('steps')):
+                                conversation_manager.add_message(conv_id, 'assistant', full_response.strip())
+                                response_saved = True
                         
                         # Rebuild inputs for next iteration (with tools schema)
                         full_response = ""  # Reset for next generation
-                        messages = build_messages(history, "", current_system_prompt)
+                        response_saved = False  # Allow saving the next iteration's response
                         tools_schema = get_tools_schema() if TOOLS_AVAILABLE else None
-                        inputs = build_inputs(messages, global_tokenizer, global_args, tools=tools_schema)
+                        # Use multimodal inputs if current step has image data
+                        if hasattr(self, '_plan_state') and self._plan_state.get('steps'):
+                            current_step_idx = self._plan_state.get('current_step', 0)
+                            current_step_data = self._plan_state['steps'][current_step_idx] if current_step_idx < len(self._plan_state['steps']) else {}
+                            inputs = _build_step_inputs(current_step_data, history, current_system_prompt, global_tokenizer, global_args, tools_schema)
+                        else:
+                            messages = build_messages(history, "", current_system_prompt)
+                            inputs = build_inputs(messages, global_tokenizer, global_args, tools=tools_schema)
                         
                         continue  # Continue the while loop for next generation
                 
@@ -2300,12 +2952,15 @@ Select and execute the appropriate tool."""
                     # Fallback: save text as step result and move to next step
                     print(f"[DEBUG] Using text response as step result (fallback)")
                     step_idx = self._plan_state['current_step']
-                    self._plan_state['all_results'].append({
+                    fallback_entry = {
                         'step': step_idx + 1,
                         'tool': 'text_fallback',
                         'success': True,
                         'result': {'text': full_response[:500]}
-                    })
+                    }
+                    if global_stop_generation:
+                        fallback_entry['stopped'] = True
+                    self._plan_state['all_results'].append(fallback_entry)
                     
                     # Send fallback result to UI
                     self.wfile.write(f"data: {json.dumps({'tool_result': {'success': True, 'tool': 'text_fallback', 'result': {'text': full_response[:200]}, 'step': step_idx + 1}})}\n\n".encode('utf-8'))
@@ -2317,11 +2972,11 @@ Select and execute the appropriate tool."""
                     steps = self._plan_state['steps']
                     
                     if step_idx < len(steps):
-                        # Execute next step
                         step = steps[step_idx]
                         suggested_tool = step.get('tool', '')
                         tool_hint = f" (suggested: {suggested_tool})" if suggested_tool else ""
-                        step_context = f"Execute step {step_idx + 1}: {step.get('name', '')}{tool_hint}. {step.get('description', '')} Call the appropriate tool(s) needed."
+                        ref_ctx = _build_ref_context(step)
+                        step_context = f"Execute step {step_idx + 1}: {step.get('name', '')}{tool_hint}. {step.get('description', '')}{ref_ctx} Call the appropriate tool(s) needed."
                         history.append({'role': 'user', 'content': step_context})
                         
                         # Notify UI of step start
@@ -2329,8 +2984,7 @@ Select and execute the appropriate tool."""
                         self.wfile.flush()
                         
                         full_response = ""
-                        messages = build_messages(history, "", current_system_prompt)
-                        inputs = build_inputs(messages, global_tokenizer, global_args, tools=tools_schema)
+                        inputs = _build_step_inputs(step, history, current_system_prompt, global_tokenizer, global_args, tools_schema)
                         continue  # Next generation
                     else:
                         # All steps completed - send plan_complete
@@ -2340,7 +2994,8 @@ Select and execute the appropriate tool."""
                             'results': self._plan_state.get('all_results', [])
                         }
                         plan_complete_msg = f"[PLAN_COMPLETE]{json.dumps(plan_complete_data, ensure_ascii=False)}"
-                        conversation_manager.add_message(conv_id, 'assistant', plan_complete_msg)
+                        if not conversation_manager.replace_last_plan_message(conv_id, plan_complete_msg):
+                            conversation_manager.add_message(conv_id, 'assistant', plan_complete_msg)
                         response_saved = True
                         self._plan_state = {}
                         
@@ -2350,18 +3005,34 @@ Select and execute the appropriate tool."""
                 
                 # No more tool calls, we're done
                 break
+            model_lock.release()
             
             # Save final response
+            # Skip during plan execution - intermediate tool calls are not user-facing
             if full_response.strip() and not response_saved:
-                conversation_manager.add_message(conv_id, 'assistant', full_response.strip())
-                response_saved = True
-                self.wfile.write(f"data: {json.dumps({'done': True})}\n\n".encode('utf-8'))
-                self.wfile.flush()
+                if not (hasattr(self, '_plan_state') and self._plan_state.get('steps')):
+                    conversation_manager.add_message(conv_id, 'assistant', full_response.strip())
+                    response_saved = True
+                    self.wfile.write(f"data: {json.dumps({'done': True})}\n\n".encode('utf-8'))
+                    self.wfile.flush()
             
-            # If stopped, still save partial response
-            if stopped and full_response.strip() and not response_saved:
-                conversation_manager.add_message(conv_id, 'assistant', full_response.strip())
-                response_saved = True
+            # If stopped, save partial plan results or partial response
+            if stopped:
+                if hasattr(self, '_plan_state') and self._plan_state.get('steps'):
+                    partial_data = {
+                        'goal': self._plan_state.get('goal', ''),
+                        'steps': self._plan_state.get('steps', []),
+                        'results': self._plan_state.get('all_results', []),
+                        'stopped': True
+                    }
+                    partial_msg = f"[PLAN_COMPLETE]{json.dumps(partial_data, ensure_ascii=False)}"
+                    if not conversation_manager.replace_last_plan_message(conv_id, partial_msg):
+                        conversation_manager.add_message(conv_id, 'assistant', partial_msg)
+                    response_saved = True
+                    self._plan_state = {}
+                elif full_response.strip() and not response_saved:
+                    conversation_manager.add_message(conv_id, 'assistant', full_response.strip())
+                    response_saved = True
                 try:
                     self.wfile.write(f"data: {json.dumps({'done': True, 'stopped': True})}\n\n".encode('utf-8'))
                     self.wfile.flush()
@@ -2369,8 +3040,24 @@ Select and execute the appropriate tool."""
                     pass  # Client disconnected, but response is already saved
         
         except Exception as e:
-            # Save partial response even on error (e.g., BrokenPipeError from client disconnect)
-            if full_response and full_response.strip() and not response_saved:
+            if model_lock._is_owned():
+                model_lock.release()
+            
+            # During plan execution, save partial plan results instead of raw tool call
+            if hasattr(self, '_plan_state') and self._plan_state.get('steps'):
+                partial_data = {
+                    'goal': self._plan_state.get('goal', ''),
+                    'steps': self._plan_state.get('steps', []),
+                    'results': self._plan_state.get('all_results', []),
+                    'stopped': True
+                }
+                partial_msg = f"[PLAN_COMPLETE]{json.dumps(partial_data, ensure_ascii=False)}"
+                if not response_saved:
+                    if not conversation_manager.replace_last_plan_message(conv_id, partial_msg):
+                        conversation_manager.add_message(conv_id, 'assistant', partial_msg)
+                    response_saved = True
+                self._plan_state = {}
+            elif full_response and full_response.strip() and not response_saved:
                 conversation_manager.add_message(conv_id, 'assistant', full_response.strip())
                 print(f"[INFO] Saved partial response ({len(full_response)} chars) after error")
             
@@ -2389,7 +3076,6 @@ Select and execute the appropriate tool."""
 def run_web_ui(model, tokenizer, model_name, system_prompt, args):
     """Run the web UI server."""
     global global_model, global_tokenizer, global_processor, global_args, global_system_prompt, global_model_name
-    global global_tool_router, global_model_type
     global conversation_manager
     
     global_model = model
@@ -2397,23 +3083,6 @@ def run_web_ui(model, tokenizer, model_name, system_prompt, args):
     global_args = args
     global_system_prompt = system_prompt
     global_model_name = model_name
-    global_model_type = args.model_type
-    
-    # Initialize tool router for 2-stage prompt system
-    if TOOL_ROUTER_AVAILABLE and TOOLS_AVAILABLE:
-        try:
-            global_tool_router = ToolRouter(
-                model=model,
-                tokenizer=tokenizer,
-                model_type=args.model_type,
-                debug=getattr(args, 'debug', False)
-            )
-            print(f"[DEBUG] Tool router initialized for {args.model_type}")
-        except Exception as e:
-            print(f"[Warning] Could not initialize tool router: {e}")
-            global_tool_router = None
-    else:
-        global_tool_router = None
     
     # Load processor for multimodal input
     model_path = find_model_path(args.model)  # Convert model name to actual path

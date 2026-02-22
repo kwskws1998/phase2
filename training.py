@@ -52,7 +52,7 @@ def run_training(args):
                 if hasattr(obj, "lr_scheduler"):
                     del obj.lr_scheduler
                 if hasattr(obj, "to"):
-                    try:
+                    try: 
                         obj.to("cpu")
                     except:
                         pass
@@ -459,8 +459,10 @@ def run_training(args):
                 "length": args.gdpo_reward_weight_length,
                 "accuracy": args.gdpo_reward_weight_accuracy,
                 "uncertainty": args.gdpo_reward_weight_uncertainty,
+                "reasoning_quality": args.gdpo_reward_weight_reasoning_quality,
                 "temperature": args.gdpo_reward_weight_temperature,
             },
+            "enable_reasoning_judge": args.gdpo_enable_reasoning_judge,
             "use_conditioned_rewards": args.gdpo_use_conditioned_rewards,
             "accuracy_threshold": args.gdpo_accuracy_threshold,
             "target_length": args.gdpo_target_length,
@@ -608,6 +610,12 @@ if __name__ == "__main__":
     # GDPO Tool Correctness Arguments
     parser.add_argument("--gdpo_tool_correctness_threshold", type=float, default=1.5,
                         help="Tool correctness threshold for conditioned rewards (default: 1.5, ~75%% match required)")
+    
+    # GDPO Reasoning Judge Arguments
+    parser.add_argument("--gdpo_enable_reasoning_judge", action="store_true",
+                        help="Enable LLM-based reasoning quality reward (config in config.yaml)")
+    parser.add_argument("--gdpo_reward_weight_reasoning_quality", type=float, default=1.0,
+                        help="Weight for reasoning quality reward (default: 1.0)")
     
     # GDPO Memory Optimization
     parser.add_argument("--gdpo_sequential", action="store_true",

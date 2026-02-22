@@ -3,28 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Inference Chat</title>
+    <title>Inference Chat (Demo)</title>
     <link rel="stylesheet" href="style.css">
     <!-- KaTeX for LaTeX rendering (local with CDN fallback) -->
     <link rel="stylesheet" href="lib/katex/katex.min.css" id="katexCss">
     <script>
         document.getElementById('katexCss').onerror = function() {
             this.onerror = null;
-            this.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css';
+            this.href = 'lib/katex/katex.min.css';
         };
     </script>
     <script defer src="lib/katex/katex.min.js"
-            onerror="this.onerror=null; this.src='https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js'"></script>
+            onerror="this.onerror=null; this.src='lib/katex/katex.min.js'"></script>
     <script defer src="lib/katex/contrib/auto-render.min.js"
-            onerror="this.onerror=null; this.src='https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js'"></script>
+            onerror="this.onerror=null; this.src='lib/katex/contrib/auto-render.min.js'"></script>
     <!-- Marked.js for Markdown rendering (local with CDN fallback) -->
     <script src="lib/marked/marked.min.js"
-            onerror="this.onerror=null; this.src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'"></script>
+            onerror="this.onerror=null; this.src='lib/marked/marked.min.js'"></script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
 </head>
 <body>
     <div class="background-layer" id="backgroundLayer"></div>
-    <div class="app-container">
+    <div class="app-init-loader" id="appInitLoader">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Initializing...</div>
+    </div>
+    <div class="app-container" id="appContainer" style="display:none">
         <!-- Sidebar -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
@@ -45,7 +49,6 @@
             <div class="sidebar-content">
                 <div class="conversations-label">Conversations</div>
                 <div class="conversations-list" id="conversationsList">
-                    <!-- Conversations will be loaded here -->
                 </div>
             </div>
             
@@ -110,6 +113,10 @@
                         <div class="file-preview-container" id="filePreviewContainer"></div>
                         
                         <div class="input-wrapper">
+                            <div class="mode-toggle" id="modeToggle">
+                                <button class="mode-btn active" data-mode="agent">Agent</button>
+                                <button class="mode-btn" data-mode="plan">Plan</button>
+                            </div>
                             <div class="input-container">
                                 <div class="input-tags" id="inputTags"></div>
                                 <textarea 
@@ -124,7 +131,7 @@
                                     <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
                                 </svg>
                             </button>
-                            <input type="file" id="fileInput" accept="image/*,audio/*" multiple hidden>
+                            <input type="file" id="fileInput" accept="image/*,audio/*,.csv,.xml,.json,.txt,.pdf,.doc,.docx,.xlsx,.xls" multiple hidden>
                             <button class="btn btn-send" id="sendBtn" title="Send message (Enter)">
                                 <svg id="sendIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <line x1="22" y1="2" x2="11" y2="13"/>
@@ -142,35 +149,52 @@
                 </div>
 
                 <!-- Detail Panel Toggle Button (sidebar style) -->
-                <button class="detail-toggle" id="detailToggle" style="display: none;" title="Toggle Detail Panel">
+                <button class="detail-toggle panel-open" id="detailToggle" title="Toggle Detail Panel">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M15 18l-6-6 6-6"/>
                     </svg>
                 </button>
 
                 <!-- Resize Handle -->
-                <div class="detail-resize-handle" id="detailResizeHandle" style="display: none;"></div>
+                <div class="detail-resize-handle" id="detailResizeHandle"></div>
 
                 <!-- Detail Panel -->
-                <div class="detail-panel" id="detailPanel" style="display: none;">
+                <div class="detail-panel" id="detailPanel">
                     <div class="detail-header">
                         <div class="detail-tabs">
                             <button class="detail-tab active" data-tab="plan">Analysis Plan</button>
+                            <button class="detail-tab" data-tab="graph">Graph</button>
                             <button class="detail-tab" data-tab="code">Code</button>
                             <button class="detail-tab" data-tab="outputs">Outputs</button>
                         </div>
-                        <button class="detail-close" id="detailClose" title="Close panel">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="18" y1="6" x2="6" y2="18"/>
-                                <line x1="6" y1="6" x2="18" y2="18"/>
-                            </svg>
-                        </button>
+                        <div class="detail-header-actions">
+                            <button class="header-rerun-btn" id="graphRerunBtn" title="Re-run Plan">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polygon points="5 3 19 12 5 21 5 3"/>
+                                </svg>
+                            </button>
+                            <button class="detail-close" id="detailClose" title="Close panel">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"/>
+                                    <line x1="6" y1="6" x2="18" y2="18"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                     <div class="detail-content">
                         <!-- Analysis Plan Tab -->
                         <div class="detail-tab-content active" id="tabPlan">
-                            <div class="detail-loading" id="planLoading">
-                                <span class="loading-text">분석 중...</span>
+                            <div class="detail-empty-state" id="planEmptyState">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                                    <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+                                    <rect x="9" y="3" width="6" height="4" rx="2"/>
+                                    <line x1="9" y1="12" x2="15" y2="12"/>
+                                    <line x1="9" y1="16" x2="13" y2="16"/>
+                                </svg>
+                                <p data-i18n="empty.plan_hint">Send a message in Plan mode and the analysis plan will appear here.</p>
+                            </div>
+                            <div class="detail-loading" id="planLoading" style="display: none;">
+                                <span class="loading-text" data-i18n="status.analyzing">Analyzing...</span>
                             </div>
                             <div class="detail-plan-content" id="planContent"></div>
                             <button class="detail-regenerate-btn" id="regeneratePlan" style="display: none;">
@@ -178,17 +202,47 @@
                                     <path d="M23 4v6h-6M1 20v-6h6"/>
                                     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                                 </svg>
-                                분석 재생성
+                                <span data-i18n="label.regenerate_analysis">Regenerate Analysis</span>
                             </button>
+                        </div>
+                        <!-- Graph Tab -->
+                        <div class="detail-tab-content" id="tabGraph" style="display: none;">
+                            <div class="node-graph-container" id="nodeGraphContainer" style="display: none;">
+                                <svg class="node-graph-svg" id="nodeGraphSvg"></svg>
+                                <div class="node-graph-canvas" id="nodeGraphCanvas"></div>
+                                <div class="ng-zoom-controls">
+                                    <button class="ng-zoom-btn" data-zoom="in" title="Zoom In">+</button>
+                                    <button class="ng-zoom-btn" data-zoom="out" title="Zoom Out">&minus;</button>
+                                    <button class="ng-zoom-btn" data-zoom="reset" title="Reset Zoom">&#8962;</button>
+                                </div>
+                                <button class="graph-popout-btn" id="graphPopoutBtn" title="Open in new window">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                                        <polyline points="15 3 21 3 21 9"/>
+                                        <line x1="10" y1="14" x2="21" y2="3"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="graph-popout-notice" id="graphPopoutNotice" style="display: none;">
+                                <span data-i18n="empty.graph_popout">Graph is open in a separate window.</span>
+                            </div>
+                            <div class="detail-empty-state" id="graphEmptyState">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                                    <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/>
+                                    <circle cx="12" cy="18" r="3"/>
+                                    <line x1="6" y1="9" x2="12" y2="15"/><line x1="18" y1="9" x2="12" y2="15"/>
+                                </svg>
+                                <p data-i18n="empty.graph_hint">When a Plan is generated, the node graph will appear here.</p>
+                            </div>
                         </div>
                         <!-- Code Tab -->
                         <div class="detail-tab-content" id="tabCode" style="display: none;">
                             <div class="code-step-selector" id="codeStepSelector"></div>
                             <div class="detail-loading" id="codeLoading" style="display: none;">
-                                <span class="loading-text">코드 생성 중...</span>
+                                <span class="loading-text" data-i18n="status.generating_code">Generating code...</span>
                             </div>
                             <div class="detail-code-content" id="codeContent">
-                                <div class="code-empty-state">Step 완료 시 코드가 자동 생성됩니다.</div>
+                                <div class="code-empty-state" data-i18n="empty.code_hint">Code will be auto-generated when a Step completes.</div>
                             </div>
                             <div class="code-actions" id="codeActions" style="display: none;">
                                 <button class="code-copy-btn" id="copyCodeBtn">
@@ -203,14 +257,14 @@
                                         <path d="M23 4v6h-6M1 20v-6h6"/>
                                         <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                                     </svg>
-                                    재생성
+                                    <span data-i18n="label.regenerate">Regenerate</span>
                                 </button>
                             </div>
                         </div>
                         <!-- Outputs Tab -->
                         <div class="detail-tab-content" id="tabOutputs" style="display: none;">
                             <div class="detail-outputs-content" id="outputsContent">
-                                <div class="outputs-empty-state">Step 결과가 여기에 표시됩니다.</div>
+                                <div class="outputs-empty-state" data-i18n="empty.outputs_hint">Step results will appear here.</div>
                             </div>
                         </div>
                     </div>
@@ -261,6 +315,10 @@
                 <button class="modal-close" onclick="closeModal('settingsModal')">&times;</button>
             </div>
             <div class="modal-body">
+                <div class="setting-item">
+                    <label class="setting-label" data-i18n="label.settings_language">Language</label>
+                    <select id="settingLanguage" class="modal-input"></select>
+                </div>
                 <div class="setting-item">
                     <label class="setting-label">Theme</label>
                     <div class="theme-buttons">
@@ -324,6 +382,24 @@
         <div class="loading-text">Loading model...</div>
     </div>
 
-    <script src="app.js"></script>
+    <link rel="stylesheet" href="node-graph.css">
+    <!-- Mock API layer MUST load before everything else -->
+    <script src="mock-api.js"></script>
+    <script src="i18n.js"></script>
+    <script src="nodes/node-registry.js"></script>
+    <script>
+    (async () => {
+        await NodeRegistry.loadAll();
+        const loadScript = (src) => new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = src;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
+        await loadScript('node-graph.js');
+        await loadScript('app.js');
+    })();
+    </script>
 </body>
 </html>

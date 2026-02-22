@@ -1,169 +1,5 @@
 // ============================================
-// Inference Chat - Frontend Logic (DEMO MODE)
-// ============================================
-
-// ============================================
-// DEMO MODE - Mock API Responses
-// ============================================
-const DEMO_MODE = true;
-let mockConversationCounter = 1;
-
-const MOCK_PLAN_RESPONSE = `I'll help you create a comprehensive plan for this task.
-
-## Goal
-Analyze the given requirements and provide a structured approach
-
-## Proposed Steps
-
-1. **Data Collection & Preprocessing**
-   - Gather all relevant data sources
-   - Clean and normalize the data
-
-2. **Exploratory Analysis**
-   - Identify patterns and trends
-   - Generate statistical summaries
-
-3. **Implementation**
-   - Develop the core solution
-   - Integrate with existing systems
-
-4. **Validation & Testing**
-   - Verify results accuracy
-   - Perform edge case testing
-
-5. **Documentation & Deployment**
-   - Document the process
-   - Deploy to production
-
-This structured plan will ensure systematic progress towards your goal.`;
-
-const MOCK_RESPONSES = [
-    "I understand your question. Based on my analysis, here's what I can tell you:\n\nThe approach you're considering is valid. I would recommend starting with a clear definition of your objectives, then systematically working through each component.\n\nWould you like me to elaborate on any specific aspect?",
-    "That's an interesting point. Let me explain further:\n\nFrom a technical perspective, there are several considerations to keep in mind:\n\n1. **Performance**: Ensure optimal resource utilization\n2. **Scalability**: Design for future growth\n3. **Maintainability**: Keep the code clean and well-documented\n\nLet me know if you need more details on any of these areas.",
-    "Here's what I found regarding your query:\n\nThe solution involves multiple steps, each building upon the previous one. The key is to maintain consistency throughout the process while adapting to any challenges that arise.\n\n```python\n# Example code snippet\ndef process_data(input_data):\n    result = transform(input_data)\n    return validate(result)\n```\n\nFeel free to ask follow-up questions!",
-    "Great question! Here's my analysis:\n\nConsidering the context you've provided, I suggest the following approach:\n\n- First, establish a baseline understanding\n- Then, iterate on the solution\n- Finally, validate and refine\n\nThis methodology has proven effective in similar scenarios.",
-];
-
-// Mock Plan Steps for demo
-const MOCK_PLAN_STEPS = [
-    { name: 'CRISPR 스크린 설계 및 설계도 작성', tool: 'search_papers', description: 'CRISPR 스크린 프로토콜 설계' },
-    { name: 'CRISPR 스크린 모델 세포 준비', tool: 'retrieve_gene_info', description: '모델 세포 및 유전자 정보 수집' },
-    { name: 'CRISPR 배양 및 세포 주입', tool: 'code_gen', description: '세포 배양 프로토콜 코드 생성' },
-    { name: 'T세포 고갈 평가 실험 설계', tool: 'search_papers', description: '평가 실험 설계 및 분석' }
-];
-
-// Mock Step Results for demo
-const MOCK_STEP_RESULTS = [
-    { success: true, summary: 'CRISPR 스크린 프로토콜 관련 논문 5편 검색 완료' },
-    { success: true, summary: '타겟 유전자 정보 및 세포주 데이터 수집 완료' },
-    { success: true, summary: '세포 배양 프로토콜 코드 생성 완료' },
-    { success: true, summary: 'T세포 고갈 평가 실험 설계 완료' }
-];
-
-// Mock Plan Analysis for demo
-const MOCK_PLAN_ANALYSIS = `## 계획 분석
-
-이 계획은 CRISPR 스크린 실험을 위한 4단계 프로세스입니다.
-
-### 주요 단계
-1. **설계 단계**: 프로토콜 설계 및 논문 검색
-2. **준비 단계**: 모델 세포 및 유전자 정보 수집
-3. **실행 단계**: 세포 배양 및 주입
-4. **평가 단계**: T세포 고갈 평가 실험
-
-### 예상 결과
-모든 단계가 성공적으로 완료되면 CRISPR 스크린 실험을 위한 완전한 프로토콜이 준비됩니다.`;
-
-// Mock Step Codes for demo
-const MOCK_STEP_CODES = [
-    {
-        code: `# Step 1: CRISPR 스크린 프로토콜 검색
-import requests
-
-def search_crispr_papers():
-    """CRISPR 스크린 관련 논문 검색"""
-    query = "CRISPR screen protocol T cell"
-    # PubMed API 호출
-    results = fetch_pubmed(query, limit=5)
-    return results
-
-papers = search_crispr_papers()
-print(f"Found {len(papers)} papers")`,
-        language: 'python'
-    },
-    {
-        code: `# Step 2: 유전자 정보 수집
-from biomart import BiomartServer
-
-def get_gene_info(gene_symbols):
-    """타겟 유전자 정보 조회"""
-    server = BiomartServer("http://www.ensembl.org/biomart")
-    dataset = server.datasets['hsapiens_gene_ensembl']
-    return dataset.search({'filters': {'hgnc_symbol': gene_symbols}})
-
-genes = get_gene_info(['CD8A', 'PDCD1', 'LAG3'])`,
-        language: 'python'
-    },
-    {
-        code: `# Step 3: 세포 배양 프로토콜
-protocol = {
-    "cell_line": "Jurkat T cells",
-    "medium": "RPMI 1640 + 10% FBS",
-    "seeding_density": "5e5 cells/ml",
-    "transfection_method": "electroporation",
-    "cas9_concentration": "1 ug/ml"
-}
-
-def prepare_cells(protocol):
-    print(f"Preparing {protocol['cell_line']}")
-    return protocol`,
-        language: 'python'
-    },
-    {
-        code: `# Step 4: T세포 고갈 평가
-import pandas as pd
-
-def evaluate_exhaustion(samples):
-    """T세포 고갈 마커 평가"""
-    markers = ['PD1', 'TIM3', 'LAG3', 'CTLA4']
-    results = pd.DataFrame()
-    for marker in markers:
-        results[marker] = analyze_expression(samples, marker)
-    return results
-
-exhaustion_score = evaluate_exhaustion(samples)`,
-        language: 'python'
-    }
-];
-
-// Mock Step Outputs for demo
-const MOCK_STEP_OUTPUTS = [
-    {
-        papers: [
-            { title: "CRISPR Screen for T Cell Exhaustion", journal: "Nature", year: 2024 },
-            { title: "Genome-wide CRISPR Analysis", journal: "Cell", year: 2023 }
-        ],
-        summary: "5편의 관련 논문 검색 완료"
-    },
-    {
-        genes: [
-            { symbol: "CD8A", name: "T-cell surface glycoprotein CD8 alpha chain" },
-            { symbol: "PDCD1", name: "Programmed cell death protein 1" }
-        ],
-        summary: "타겟 유전자 3개 정보 수집"
-    },
-    {
-        protocol: { cell_line: "Jurkat", method: "Electroporation" },
-        summary: "세포 배양 프로토콜 생성 완료"
-    },
-    {
-        markers: ["PD1", "TIM3", "LAG3"],
-        summary: "T세포 고갈 평가 설계 완료"
-    }
-];
-
-// ============================================
-// State
+// Inference Chat - Frontend Logic
 // ============================================
 
 // State
@@ -173,25 +9,26 @@ let isStreaming = false;
 let sidebarCollapsed = false;
 let currentAbortController = null;
 let currentMessages = [];
-let editingIndex = -1;  // -1 = 수정 모드 아님
-let pendingFiles = [];  // 첨부 파일 배열 { type: 'image'|'audio', name, data }
-let scrollLockUntil = 0;  // 스크롤 잠금 해제 시간 (timestamp)
-let currentStepQuestion = null;  // Step 질문 컨텍스트 { stepNum, tool, stepName, context, previousSteps }
+let editingIndex = -1;  // -1 = not in edit mode
+let pendingFiles = [];  // Attached files array { type: 'image'|'audio', name, data }
+let scrollLockUntil = 0;  // Scroll lock release time (timestamp)
+let currentStepQuestion = null;  // Step question context { stepNum, tool, stepName, context, previousSteps }
 
 // Detail Panel State
-let detailPanelOpen = false;
-let detailPanelWidth = 400;  // Default width
+let detailPanelOpen = true;
+let detailPanelWidth = 600;  // Default width
 let detailPanelData = {
     goal: '',
     steps: [],
-    results: [],      // tool_result 누적
-    codes: {},        // Step별 코드 { stepIndex: { language, code, task } }
-    summaryCode: null, // 종합 코드
-    analysis: '',     // analyze_plan 결과
+    results: [],      // tool_result accumulation
+    codes: {},        // Code per Step { stepIndex: { language, code } }
+    analysis: '',     // analyze_plan result
     currentStep: 0
 };
-let currentCodeStep = 'all';  // 현재 Code 탭에서 선택된 Step (기본값: all)
-
+let currentCodeStep = null;  // Currently selected Step in Code tab
+let currentMode = 'agent';   // 'agent' or 'plan'
+let graphPopoutWindow = null; // Reference to popped-out graph window
+let nodeGraph = null;         // NodeGraph instance
 // DOM Elements
 const sidebar = document.getElementById('sidebar');
 const sidebarToggle = document.getElementById('sidebarToggle');
@@ -220,11 +57,16 @@ const chatArea = document.getElementById('chatArea');
 // Initialization
 // ============================================
 
-document.addEventListener('DOMContentLoaded', () => {
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => initializeApp());
+} else {
     initializeApp();
-});
+}
 
 async function initializeApp() {
+    // Load i18n locale
+    await initI18n();
+    
     // Apply saved theme
     setTheme(getTheme());
     
@@ -233,7 +75,7 @@ async function initializeApp() {
     applyBgBlur();
     applyBgOpacity();
     
-    // Load sidebar state from localStorage (transition 없이 초기 적용)
+    // Load sidebar state from localStorage (apply initially without transition)
     const savedSidebarState = localStorage.getItem('sidebarCollapsed');
     if (savedSidebarState === 'true') {
         sidebarCollapsed = true;
@@ -242,7 +84,7 @@ async function initializeApp() {
         mainContent.style.marginLeft = '50px';
         sidebar.classList.add('collapsed');
         
-        // 다음 프레임에서 transition 속성 완전 제거
+        // Completely remove transition property in next frame
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 sidebar.style.removeProperty('transition');
@@ -251,11 +93,37 @@ async function initializeApp() {
         });
     }
     
+    // Restore mode from localStorage
+    const savedMode = localStorage.getItem('inferenceMode');
+    if (savedMode === 'plan' || savedMode === 'agent') {
+        currentMode = savedMode;
+    }
+    applyModeToggle();
+    
+    // Detail panel always visible - set initial width
+    document.documentElement.style.setProperty('--detail-panel-width', detailPanelWidth + 'px');
+    
+    // Initialize node graph
+    const graphContainer = document.getElementById('nodeGraphContainer');
+    if (graphContainer && typeof NodeGraph !== 'undefined') {
+        nodeGraph = new NodeGraph(graphContainer);
+        graphContainer.addEventListener('graph-layout-changed', () => {
+            if (currentConversationId && nodeGraph) {
+                localStorage.setItem('graphLayout-' + currentConversationId, JSON.stringify(nodeGraph.getLayout()));
+            }
+        });
+    }
+    
     // Setup event listeners
     setupEventListeners();
     
     // Load conversations list
     await loadConversations();
+    
+    // Auto-load the most recent conversation
+    if (conversations.length > 0) {
+        await loadConversation(conversations[0].id);
+    }
     
     // Get model info
     await getModelInfo();
@@ -282,7 +150,7 @@ function setupEventListeners() {
     
     // Enter to send, Backspace to remove tag
     messageInput.addEventListener('keydown', (e) => {
-        // Backspace로 태그 삭제 (입력창이 비어있을 때)
+        // Delete tag with Backspace (when input is empty)
         if (e.key === 'Backspace' && messageInput.value === '' && currentStepQuestion) {
             removeStepTag();
             e.preventDefault();
@@ -298,14 +166,14 @@ function setupEventListeners() {
     // File upload
     setupFileUpload();
     
-    // 휠 이벤트 - 스크롤 잠금/해제 (사용자의 의도적인 스크롤만)
+    // Wheel event - scroll lock/unlock (only intentional user scrolling)
     messagesContainer.addEventListener('wheel', (e) => {
         if (e.deltaY < 0) {
-            // 위로 스크롤 → 무한 잠금 (사용자가 하단으로 스크롤할 때까지)
+            // Scroll up -> infinite lock (until user scrolls to bottom)
             scrollLockUntil = Infinity;
         } else if (e.deltaY > 0) {
-            // 아래로 스크롤 → 하단 근처면 잠금 해제 (자동 스크롤 재활성화)
-            const threshold = 150;  // 하단에서 150px 이내
+            // Scroll down -> unlock if near bottom (reactivate auto-scroll)
+            const threshold = 150;  // Within 150px from bottom
             const distanceFromBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight;
             if (distanceFromBottom < threshold) {
                 scrollLockUntil = 0;
@@ -313,7 +181,7 @@ function setupEventListeners() {
         }
     });
     
-    // 스크롤 이벤트 - 버튼 표시/숨김만 (잠금 해제는 wheel에서만)
+    // Scroll event - show/hide button only (unlock only via wheel)
     messagesContainer.addEventListener('scroll', () => {
         const threshold = 200;
         const distanceFromBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight;
@@ -322,17 +190,17 @@ function setupEventListeners() {
             scrollToBottomBtn.classList.add('visible');
         } else {
             scrollToBottomBtn.classList.remove('visible');
-            // 잠금 해제는 wheel 이벤트에서만 처리 (프로그래매틱 스크롤과 구분)
+            // Unlock only handled in wheel event (distinguish from programmatic scroll)
         }
     });
     
-    // 하단 이동 버튼 클릭
+    // Scroll to bottom button click
     scrollToBottomBtn.addEventListener('click', () => {
         scrollLockUntil = 0;
         scrollToBottom(true);
     });
     
-    // Input area hover 시 버튼 선명하게
+    // Make button clear on input area hover
     const inputArea = document.getElementById('dropZone');
     inputArea.addEventListener('mouseenter', () => {
         scrollToBottomBtn.classList.add('input-hover');
@@ -340,6 +208,36 @@ function setupEventListeners() {
     inputArea.addEventListener('mouseleave', () => {
         scrollToBottomBtn.classList.remove('input-hover');
     });
+    
+    // Mode toggle
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            currentMode = btn.dataset.mode;
+            localStorage.setItem('inferenceMode', currentMode);
+            applyModeToggle();
+        });
+    });
+    
+    // Graph popout button
+    const graphPopoutBtn = document.getElementById('graphPopoutBtn');
+    if (graphPopoutBtn) {
+        graphPopoutBtn.addEventListener('click', openGraphPopout);
+    }
+    
+    // Graph re-run button
+    const graphRerunBtn = document.getElementById('graphRerunBtn');
+    if (graphRerunBtn) {
+        graphRerunBtn.addEventListener('click', rerunPlanFromGraph);
+    }
+    
+    // BroadcastChannel for graph popout communication
+    setupGraphChannel();
+
+    // Remove init loader and show app
+    const appInitLoader = document.getElementById('appInitLoader');
+    if (appInitLoader) appInitLoader.remove();
+    const appContainer = document.getElementById('appContainer');
+    if (appContainer) appContainer.style.display = '';
 }
 
 // ============================================
@@ -419,11 +317,10 @@ function getMaxImages() {
     return parseInt(localStorage.getItem('maxImages') || '5');
 }
 
-function handleFiles(files) {
+async function handleFiles(files) {
     const maxImages = getMaxImages();
     
     for (const file of files) {
-        // Check image limit before adding
         if (file.type.startsWith('image/')) {
             const currentImageCount = pendingFiles.filter(f => f.type === 'image').length;
             if (currentImageCount >= maxImages) {
@@ -432,39 +329,68 @@ function handleFiles(files) {
             }
         }
         
-        const reader = new FileReader();
-        reader.onload = (e) => {
+        const dataUrl = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.readAsDataURL(file);
+        });
+
+        try {
+            const resp = await fetch('/api/data/upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: file.name, data: dataUrl })
+            });
+            if (!resp.ok) throw new Error('Upload failed');
+            const result = await resp.json();
+
             if (file.type.startsWith('image/')) {
-                // Double-check limit in async callback
                 const currentImageCount = pendingFiles.filter(f => f.type === 'image').length;
                 if (currentImageCount < maxImages) {
-                    pendingFiles.push({ type: 'image', name: file.name, data: e.target.result });
-                    renderFilePreviews();
+                    pendingFiles.push({
+                        type: 'image', name: result.fileName,
+                        uploadId: result.uploadId,
+                        previewUrl: `/uploads/${result.uploadId}`
+                    });
                 }
             } else if (file.type.startsWith('audio/')) {
-                pendingFiles.push({ type: 'audio', name: file.name, data: e.target.result });
-                renderFilePreviews();
+                pendingFiles.push({
+                    type: 'audio', name: result.fileName,
+                    uploadId: result.uploadId, data: dataUrl
+                });
+            } else {
+                pendingFiles.push({
+                    type: 'document', name: result.fileName,
+                    uploadId: result.uploadId,
+                    textContent: result.textContent,
+                    fileSize: result.fileSize,
+                    extractionMethod: result.extractionMethod
+                });
             }
-        };
-        reader.readAsDataURL(file);
+            renderFilePreviews();
+        } catch (err) {
+            console.error('File upload failed:', err);
+            alert(`Failed to upload ${file.name}`);
+        }
     }
 }
 
 function renderFilePreviews() {
     const container = document.getElementById('filePreviewContainer');
     if (pendingFiles.length === 0) {
-        container.innerHTML = '';  // :empty CSS로 자동 숨김
+        container.innerHTML = '';  // Auto-hidden via :empty CSS
         return;
     }
     
-    // 파일 미리보기 렌더링 (:empty가 아니므로 자동 표시)
     container.innerHTML = pendingFiles.map((f, i) => `
         <div class="file-preview ${f.type}">
-            ${f.type === 'image' 
-                ? `<img src="${f.data}" alt="${escapeHtml(f.name)}">` 
-                : `<span class="file-icon">🎵</span><span class="file-name">${escapeHtml(f.name)}</span>`
+            ${f.type === 'image'
+                ? `<img src="${f.previewUrl || f.data}" alt="${escapeHtml(f.name)}">`
+                : f.type === 'document'
+                ? `<span class="file-icon doc-icon"></span><span class="file-name">${escapeHtml(f.name)}</span>`
+                : `<span class="file-icon audio-icon"></span><span class="file-name">${escapeHtml(f.name)}</span>`
             }
-            <button class="file-remove" onclick="removeFile(${i})" title="Remove">×</button>
+            <button class="file-remove" onclick="removeFile(${i})" title="Remove">\u00d7</button>
         </div>
     `).join('');
 }
@@ -492,11 +418,11 @@ function toggleSidebar(forceCollapse = null) {
         sidebarCollapsed = !sidebarCollapsed;
     }
     
-    // 메인 영역 margin-left 설정
+    // Set main area margin-left
     const sidebarWidth = sidebarCollapsed ? 50 : 280;
     mainContent.style.marginLeft = sidebarWidth + 'px';
     
-    // 클래스 토글 (transform은 CSS에서 처리)
+    // Toggle class (transform handled in CSS)
     sidebar.classList.toggle('collapsed', sidebarCollapsed);
     localStorage.setItem('sidebarCollapsed', sidebarCollapsed);
 }
@@ -506,12 +432,6 @@ function toggleSidebar(forceCollapse = null) {
 // ============================================
 
 async function loadConversations() {
-    if (DEMO_MODE) {
-        // Demo mode: use local conversations array
-        renderConversationsList();
-        return;
-    }
-    
     try {
         const response = await fetch('/api/conversations');
         if (!response.ok) throw new Error('Failed to load conversations');
@@ -555,29 +475,15 @@ function renderConversationsList() {
 }
 
 async function loadConversation(id) {
-    // Hide detail panel when switching conversations
-    hideDetailPanel();
-    
-    // 다른 채팅으로 이동 시 생성 중이면 중단 (현재까지 내용은 서버에서 자동 저장됨)
+    // Stop generation when switching chats (content so far is auto-saved on server)
     if (isStreaming && currentConversationId !== id) {
         stopGeneration();
-        // 잠시 대기하여 서버가 partial response를 저장할 시간 확보
+        // Brief wait to let server save partial response
         await new Promise(r => setTimeout(r, 300));
     }
     
-    // 채팅 로드 시 자동 스크롤 활성화 (기본 동작)
+    // Activate auto-scroll on chat load (default behavior)
     scrollLockUntil = 0;
-    
-    if (DEMO_MODE) {
-        // Demo mode: find conversation from local array
-        const conv = conversations.find(c => c.id === id);
-        if (conv) {
-            currentConversationId = id;
-            renderConversationsList();
-            renderMessages(conv.messages || []);
-        }
-        return;
-    }
     
     try {
         const response = await fetch(`/api/conversation/${id}`);
@@ -588,6 +494,9 @@ async function loadConversation(id) {
         
         renderConversationsList();
         renderMessages(conversation.messages || []);
+        
+        // Restore detail panel from last PLAN_COMPLETE message (or reset if none)
+        restoreDetailPanelFromMessages(conversation.messages || []);
     } catch (error) {
         console.error('Error loading conversation:', error);
     }
@@ -597,33 +506,14 @@ async function createNewChat() {
     // Hide detail panel for new chat
     hideDetailPanel();
     
-    // 생성 중이면 중단 (현재까지 내용은 서버에서 자동 저장됨)
+    // Stop if generating (content so far is auto-saved on server)
     if (isStreaming) {
         stopGeneration();
         await new Promise(r => setTimeout(r, 300));
     }
     
-    // 새 채팅 시 자동 스크롤 활성화
+    // Activate auto-scroll for new chat
     scrollLockUntil = 0;
-    
-    if (DEMO_MODE) {
-        // Demo mode: create local conversation
-        const newId = `demo-${mockConversationCounter++}`;
-        const newConv = {
-            id: newId,
-            title: 'New Chat',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            messages: []
-        };
-        conversations.unshift(newConv);
-        currentConversationId = newId;
-        
-        renderConversationsList();
-        renderMessages([]);
-        messageInput.focus();
-        return;
-    }
     
     try {
         const response = await fetch('/api/new', { method: 'POST' });
@@ -644,18 +534,6 @@ async function deleteConversation(event, id) {
     event.stopPropagation();
     
     if (!confirm('Delete this conversation?')) return;
-    
-    if (DEMO_MODE) {
-        // Demo mode: remove from local array
-        conversations = conversations.filter(c => c.id !== id);
-        if (currentConversationId === id) {
-            hideDetailPanel();
-            currentConversationId = null;
-            renderMessages([]);
-        }
-        renderConversationsList();
-        return;
-    }
     
     try {
         const response = await fetch(`/api/conversation/${id}`, { method: 'DELETE' });
@@ -680,18 +558,6 @@ async function clearCurrentChat() {
     // Hide detail panel when clearing chat
     hideDetailPanel();
     
-    if (DEMO_MODE) {
-        // Demo mode: clear messages from local array
-        const conv = conversations.find(c => c.id === currentConversationId);
-        if (conv) {
-            conv.messages = [];
-        }
-        currentMessages = [];
-        renderMessages([]);
-        renderConversationsList();
-        return;
-    }
-    
     try {
         const response = await fetch(`/api/conversation/${currentConversationId}/clear`, { method: 'POST' });
         if (!response.ok) throw new Error('Failed to clear chat');
@@ -714,6 +580,7 @@ function renderMessages(messages) {
         welcomeMessage.style.display = 'block';
         messagesWrapper.innerHTML = '';
         messagesWrapper.appendChild(welcomeMessage);
+        scrollToBottomBtn.classList.remove('visible');
         return;
     }
     
@@ -1003,7 +870,7 @@ function parseSpecialTokens(content) {
         ));
     }
     
-    // [TOOL_CONTENT] (단독 토큰)
+    // [TOOL_CONTENT] (standalone token)
     const toolContentMatch = result.answer.match(/\[TOOL_CONTENT\]([\s\S]*?)(?=\[(?!\/)|$)/);
     if (toolContentMatch) {
         result.toolContent = toolContentMatch[1].trim();
@@ -1091,7 +958,7 @@ function createCoTHTML(cotContent) {
         <div class="cot-container">
             <button class="cot-toggle" onclick="toggleSpecialToken(this)">
                 <span class="cot-icon">✦</span>
-                <span class="cot-label">생각하는 과정 표시</span>
+                <span class="cot-label">${t('label.cot')}</span>
                 <span class="cot-arrow">▼</span>
             </button>
             <div class="cot-content">${escapeHtml(cotContent)}</div>
@@ -1119,11 +986,11 @@ function createInlinePlanStepsHTML(args) {
     const goal = args.goal || '';
     const steps = args.steps || [];
     
-    // Goal header with plan reference button
+    // Goal header with plan reference button (same structure as createCompletedPlanHTML)
     let goalHTML = goal ? `
-        <div class="plan-goal-container">
-            <div class="plan-goal">${escapeHtml(goal)}</div>
-            <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="Plan 전체 참고하여 질문">
+        <div class="plan-goal plan-goal-row">
+            <span class="plan-goal-text">${escapeHtml(goal)}</span>
+            <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="${t('tooltip.plan_ref')}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/>
                     <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
@@ -1147,19 +1014,19 @@ function createInlinePlanStepsHTML(args) {
                         </div>
                     </div>
                     <div class="step-actions">
-                        <button class="step-action-btn" onclick="event.stopPropagation(); retryStep(${stepNum})" title="재시도">
+                        <button class="step-action-btn" onclick="event.stopPropagation(); retryStep(${stepNum})" title="${t('tooltip.retry')}">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M23 4v6h-6M1 20v-6h6"/>
                                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                             </svg>
                         </button>
-                        <button class="step-action-btn" onclick="event.stopPropagation(); editStepResult(${stepNum})" title="결과 수정">
+                        <button class="step-action-btn" onclick="event.stopPropagation(); editStepResult(${stepNum})" title="${t('tooltip.edit_result')}">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                             </svg>
                         </button>
-                        <button class="step-action-btn" onclick="event.stopPropagation(); askAboutStep(${stepNum})" title="질문하기">
+                        <button class="step-action-btn" onclick="event.stopPropagation(); askAboutStep(${stepNum})" title="${t('tooltip.ask')}">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"/>
                                 <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
@@ -1185,17 +1052,13 @@ function createCompletedPlanHTML(planData) {
     const steps = planData.steps || [];
     const results = planData.results || [];
     
-    // Create a map of step index to result
-    const resultMap = {};
-    results.forEach(r => {
-        resultMap[r.step] = r;
-    });
+    const resultMap = mergeResultsByStep(results);
     
     // Goal header with plan reference button (button inside goal bar)
     let goalHTML = goal ? `
         <div class="plan-goal plan-goal-row">
             <span class="plan-goal-text">${escapeHtml(goal)}</span>
-            <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="Plan 전체 참고하여 질문">
+            <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="${t('tooltip.plan_ref')}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/>
                     <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
@@ -1209,18 +1072,23 @@ function createCompletedPlanHTML(planData) {
     steps.forEach((step, index) => {
         const stepNum = index + 1;
         const result = resultMap[stepNum];
-        const statusClass = result ? (result.success ? 'completed' : 'error') : 'pending';
-        const indicator = result ? (result.success ? '✓' : '!') : stepNum;
+        const statusClass = result
+            ? (result.stopped ? 'stopped' : (result.success ? 'completed' : 'error'))
+            : (planData.stopped ? 'stopped' : 'pending');
+        const indicator = result
+            ? (result.stopped ? '◼' : (result.success ? '✓' : '!'))
+            : (planData.stopped ? '◼' : stepNum);
         
         let resultHTML = '';
         if (result) {
-            // Use formatStepResult for full display (thought, action, result)
-            const formattedResult = formatStepResult({
-                success: result.success,
-                thought: result.thought,
-                action: result.action,
-                result: result.result
-            });
+            const parts = (result._merged || [result]).map(r => formatStepResult({
+                success: r.success,
+                thought: r.thought,
+                action: r.action,
+                error: r.error,
+                result: r.result
+            }));
+            const formattedResult = parts.join('<hr class="tool-result-divider">');
             resultHTML = `<div class="step-result" style="display: block;">${formattedResult}</div>`;
         }
         
@@ -1235,19 +1103,19 @@ function createCompletedPlanHTML(planData) {
                         </div>
                     </div>
                     <div class="step-actions">
-                        <button class="step-action-btn" onclick="event.stopPropagation(); retryStep(${stepNum})" title="재시도">
+                        <button class="step-action-btn" onclick="event.stopPropagation(); retryStep(${stepNum})" title="${t('tooltip.retry')}">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M23 4v6h-6M1 20v-6h6"/>
                                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                             </svg>
                         </button>
-                        <button class="step-action-btn" onclick="event.stopPropagation(); editStepResult(${stepNum})" title="결과 수정">
+                        <button class="step-action-btn" onclick="event.stopPropagation(); editStepResult(${stepNum})" title="${t('tooltip.edit_result')}">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                             </svg>
                         </button>
-                        <button class="step-action-btn" onclick="event.stopPropagation(); askAboutStep(${stepNum})" title="질문하기">
+                        <button class="step-action-btn" onclick="event.stopPropagation(); askAboutStep(${stepNum})" title="${t('tooltip.ask')}">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"/>
                                 <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
@@ -1404,7 +1272,7 @@ async function sendMessage(customContent = null) {
     document.getElementById('inputTags').innerHTML = '';
     messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
     
-    // 메시지 전송 시 자동 스크롤 활성화
+    // Activate auto-scroll when sending message
     scrollLockUntil = 0;
     
     // Create new conversation if needed
@@ -1423,7 +1291,11 @@ async function sendMessage(customContent = null) {
     // Build display content for user message
     let displayContent = content;
     if (files.length > 0) {
-        const fileLabels = files.map(f => f.type === 'image' ? `[Image: ${f.name}]` : `[Audio: ${f.name}]`).join(' ');
+        const fileLabels = files.map(f => {
+            if (f.type === 'image') return `[Image: ${f.name}]`;
+            if (f.type === 'document') return `[Document: ${f.name}]`;
+            return `[Audio: ${f.name}]`;
+        }).join(' ');
         displayContent = fileLabels + (content ? '\n' + content : '');
     }
     
@@ -1442,109 +1314,22 @@ async function sendMessage(customContent = null) {
     // Add streaming indicator
     contentDiv.innerHTML = '<span class="streaming-indicator"><span class="streaming-dot"></span><span class="streaming-dot"></span><span class="streaming-dot"></span></span>';
     
+    let fullContent = '';
+    let buffer = '';
+    
     try {
-        // DEMO MODE: Simulate streaming response
-        if (DEMO_MODE) {
-            const isPlanRequest = content.toLowerCase().includes('plan');
-            
-            if (isPlanRequest) {
-                // Plan 요청: 텍스트 스트리밍 없이 바로 Plan box 생성
-                const planData = {
-                    goal: 'CRISPR 스크린 실험을 위한 단계별 계획',
-                    steps: MOCK_PLAN_STEPS.map((s, i) => ({
-                        id: i + 1,
-                        name: s.name,
-                        tool: s.tool,
-                        description: s.description
-                    }))
-                };
-                
-                const mockToolCall = { arguments: planData };
-                const planBox = createPlanStepsBox(mockToolCall);
-                contentDiv.appendChild(planBox);
-                
-                // Detail Panel 열기 (planData 전달)
-                openDetailPanel(planData);
-                
-                // streaming indicator 제거
-                const indicator = contentDiv.querySelector('.streaming-indicator');
-                if (indicator) indicator.remove();
-                
-                // Step 완료 애니메이션 (비동기 - await 없이 실행)
-                animatePlanSteps(planData.steps);
-                
-                // 대화 저장
-                const conv = conversations.find(c => c.id === currentConversationId);
-                if (conv) {
-                    if (!conv.messages) conv.messages = [];
-                    conv.messages.push({ role: 'user', content: displayContent });
-                    conv.messages.push({ role: 'assistant', content: '[Plan Created]' });
-                    if (conv.title === 'New Chat') {
-                        conv.title = content.substring(0, 30) + (content.length > 30 ? '...' : '');
-                    }
-                    conv.updated_at = new Date().toISOString();
-                }
-                currentMessages.push({ role: 'user', content: displayContent });
-                currentMessages.push({ role: 'assistant', content: '[Plan Created]' });
-                
-                isStreaming = false;
-                setStreamingUI(false);
-                renderConversationsList();
-                scrollToBottom();
-                return;
-            }
-            
-            // 일반 응답: 텍스트 스트리밍
-            const mockResponse = MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)];
-            
-            // Simulate token-by-token streaming
-            let fullContent = '';
-            const words = mockResponse.split(' ');
-            
-            for (let i = 0; i < words.length; i++) {
-                if (!isStreaming) break;  // Check if stopped
-                
-                fullContent += (i > 0 ? ' ' : '') + words[i];
-                updateAssistantMessage(contentDiv, fullContent);
-                scrollToBottom();
-                await new Promise(r => setTimeout(r, 30 + Math.random() * 20));
-            }
-            
-            // Update conversation in local array
-            const conv = conversations.find(c => c.id === currentConversationId);
-            if (conv) {
-                if (!conv.messages) conv.messages = [];
-                conv.messages.push({ role: 'user', content: displayContent });
-                conv.messages.push({ role: 'assistant', content: fullContent });
-                // Update title from first user message
-                if (conv.title === 'New Chat' && content.length > 0) {
-                    conv.title = content.substring(0, 30) + (content.length > 30 ? '...' : '');
-                }
-                conv.updated_at = new Date().toISOString();
-            }
-            
-            // Update currentMessages
-            currentMessages.push({ role: 'user', content: displayContent });
-            currentMessages.push({ role: 'assistant', content: fullContent });
-            
-            // Remove streaming indicator
-            const indicator = contentDiv.querySelector('.streaming-indicator');
-            if (indicator) indicator.remove();
-            
-            // Finish streaming
-            isStreaming = false;
-            setStreamingUI(false);
-            renderConversationsList();
-            return;
-        }
-        
-        // Build request body with files
+        // Build request body with files and mode
         const requestBody = {
             conversation_id: currentConversationId,
-            message: content
+            message: content,
+            mode: currentMode
         };
         if (files.length > 0) {
-            requestBody.files = files;
+            requestBody.files = files.map(f => {
+                if (f.type === 'image') return { type: 'image', name: f.name, uploadId: f.uploadId };
+                if (f.type === 'document') return { type: 'document', name: f.name, uploadId: f.uploadId, textContent: f.textContent };
+                return { type: f.type, name: f.name, data: f.data };
+            });
         }
         
         const response = await fetch('/api/chat', {
@@ -1562,8 +1347,6 @@ async function sendMessage(customContent = null) {
         // Read SSE stream
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let fullContent = '';
-        let buffer = '';  // Buffer for incomplete SSE lines
         
         while (true) {
             const { done, value } = await reader.read();
@@ -1593,7 +1376,8 @@ async function sendMessage(customContent = null) {
                                 // Open Detail Panel with plan data
                                 const args = data.tool_call.arguments || {};
                                 openDetailPanel({
-                                    goal: args.goal || '',
+                                    goal: args.goal || content || '',
+                                    userMessage: content,
                                     steps: (args.steps || []).map((s, i) => ({
                                         id: i + 1,
                                         name: s.name || '',
@@ -1608,9 +1392,8 @@ async function sendMessage(customContent = null) {
                                     // Find step by tool name (first pending one with matching tool)
                                     const toolName = data.tool_call.name;
                                     const stepEl = planBox.querySelector(`.plan-step.pending[data-tool="${toolName}"]`) ||
-                                                   planBox.querySelector(`[data-tool="${toolName}"]`);
-                                    if (stepEl) {
-                                        // Update step status to "running"
+                                                   planBox.querySelector(`.plan-step:not(.completed):not(.error)[data-tool="${toolName}"]`);
+                                    if (stepEl && !stepEl.classList.contains('completed')) {
                                         stepEl.classList.remove('pending');
                                         stepEl.classList.add('running');
                                         // Force visual update
@@ -1632,6 +1415,11 @@ async function sendMessage(customContent = null) {
                                 const stepIndex = data.tool_result.step - 1; // Convert to 0-based
                                 addToolResultToDetailPanel(stepIndex, data.tool_result);
                             }
+                            if (nodeGraph && data.tool_result.step !== undefined) {
+                                const status = data.tool_result.success ? 'completed' : 'error';
+                                nodeGraph.setNodeStatus(`step-${data.tool_result.step}`, status);
+                                broadcastGraphMessage({ type: 'step-update', payload: { step: data.tool_result.step, status } });
+                            }
                         }
                         
                         // Handle step start events (LLM starting to generate tool call for this step)
@@ -1645,12 +1433,16 @@ async function sendMessage(customContent = null) {
                                     scrollToBottom();
                                 }
                             }
+                            if (nodeGraph) {
+                                nodeGraph.setNodeStatus(`step-${data.step_start.step}`, 'running');
+                            }
+                            broadcastGraphMessage({ type: 'step-update', payload: { step: data.step_start.step, status: 'running' } });
                         }
                         
                         if (data.done) {
                             // If plan execution completed, update plan box with results
                             if (data.plan_complete) {
-                                // Streaming indicator 제거
+                                // Remove streaming indicator
                                 const streamingIndicator = contentDiv.querySelector('.streaming-indicator');
                                 if (streamingIndicator) {
                                     streamingIndicator.remove();
@@ -1857,12 +1649,70 @@ async function sendMessage(customContent = null) {
         
     } catch (error) {
         if (error.name === 'AbortError') {
-            // User stopped generation - keep partial response
             console.log('Generation stopped by user');
-            // Wait for server to save partial response before reloading
-            await new Promise(r => setTimeout(r, 500));
-            // Reload to show Edit/Regenerate buttons and update sidebar title
-            await loadConversation(currentConversationId);
+            const streamingIndicator = contentDiv.querySelector('.streaming-indicator');
+            if (streamingIndicator) streamingIndicator.remove();
+            const planBox = document.getElementById('current-plan-box');
+            if (planBox) {
+                planBox.querySelectorAll('.plan-step.running').forEach(step => {
+                    step.classList.remove('running');
+                    step.classList.add('stopped');
+                    const ind = step.querySelector('.step-indicator');
+                    if (ind) ind.textContent = '◼';
+                });
+                planBox.querySelectorAll('.plan-step.pending').forEach(step => {
+                    step.classList.remove('pending');
+                    step.classList.add('stopped');
+                    const ind = step.querySelector('.step-indicator');
+                    if (ind) ind.textContent = '◼';
+                });
+            }
+            if (nodeGraph) {
+                nodeGraph.resetRunningNodes();
+            }
+
+            currentMessages.push({ role: 'user', content: displayContent });
+            currentMessages.push({ role: 'assistant', content: fullContent });
+            const userMsgIndex = currentMessages.length - 2;
+            const assistantMsgIndex = currentMessages.length - 1;
+
+            const messageElements = messagesWrapper.querySelectorAll('.message');
+            if (messageElements.length >= 2) {
+                const userMsgEl = messageElements[messageElements.length - 2];
+                const assistantMsgEl = messageElements[messageElements.length - 1];
+                if (userMsgEl) {
+                    userMsgEl.setAttribute('data-index', userMsgIndex);
+                }
+                if (assistantMsgEl) {
+                    assistantMsgEl.setAttribute('data-index', assistantMsgIndex);
+                    let actionsDiv = assistantMsgEl.querySelector('.message-actions');
+                    if (!actionsDiv) {
+                        actionsDiv = document.createElement('div');
+                        actionsDiv.className = 'message-actions';
+                        assistantMsgEl.appendChild(actionsDiv);
+                    }
+                    actionsDiv.innerHTML = `
+                        <button class="message-action-btn" onclick="regenerateFrom(${assistantMsgIndex})" title="Regenerate">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 4v6h-6M1 20v-6h6"/>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                            </svg>
+                        </button>
+                        <button class="message-action-btn" onclick="copyMessage(${assistantMsgIndex})" title="Copy">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                            </svg>
+                        </button>
+                        <button class="message-action-btn delete-btn" onclick="deleteFromMessage(${assistantMsgIndex})" title="Delete from here">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                        </button>
+                    `;
+                }
+            }
+
             await loadConversations();
         } else {
             console.error('Error sending message:', error);
@@ -1872,6 +1722,8 @@ async function sendMessage(customContent = null) {
         isStreaming = false;
         currentAbortController = null;
         setStreamingUI(false);
+        const remainingIndicator = contentDiv.querySelector('.streaming-indicator');
+        if (remainingIndicator) remainingIndicator.remove();
     }
 }
 
@@ -1923,7 +1775,7 @@ function updateAssistantMessage(contentDiv, content) {
         html += `<div class="cot-container">
             <button class="cot-toggle" onclick="toggleSpecialToken(this)">
                 <span class="cot-icon">✦</span>
-                <span class="cot-label" style="color: var(--text-cot);">생각하는 과정 표시</span>
+                <span class="cot-label" style="color: var(--text-cot);">${t('label.cot')}</span>
                 <span class="cot-arrow">▼</span>
             </button>
         </div>`;
@@ -1963,11 +1815,6 @@ function updateAssistantMessage(contentDiv, content) {
 // ============================================
 
 async function getModelInfo() {
-    if (DEMO_MODE) {
-        modelName.textContent = 'Biomni-Demo';
-        return;
-    }
-    
     try {
         const response = await fetch('/api/model');
         if (!response.ok) throw new Error('Failed to get model info');
@@ -2104,7 +1951,7 @@ function formatDate(dateString) {
 }
 
 function scrollToBottom(force = false) {
-    // 시간 기반 잠금: 잠금 시간이 지났거나 force면 스크롤
+    // Time-based lock: scroll if lock time passed or forced
     if (force || Date.now() > scrollLockUntil) {
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
@@ -2167,13 +2014,9 @@ function setStreamingUI(streaming) {
 function stopGeneration() {
     if (currentAbortController) {
         currentAbortController.abort();
-        // Also notify server to stop (skip in demo mode)
-        if (!DEMO_MODE) {
-            fetch('/api/stop', { method: 'POST' }).catch(() => {});
-        }
+        // Also notify server to stop
+        fetch('/api/stop', { method: 'POST' }).catch(() => {});
     }
-    isStreaming = false;
-    setStreamingUI(false);
 }
 
 // ============================================
@@ -2186,26 +2029,26 @@ async function editMessage(index) {
     const message = currentMessages[index];
     if (!message || message.role !== 'user') return;
     
-    // 메시지 요소 찾기
+    // Find message element
     const messageEl = document.querySelector(`.message[data-index="${index}"]`);
     if (!messageEl) return;
     
-    // 이미 편집 중이면 무시
+    // Ignore if already editing
     if (messageEl.classList.contains('editing')) return;
     
-    // 편집 모드 진입
+    // Enter edit mode
     editingIndex = index;
     messageEl.classList.add('editing');
     
     const contentDiv = messageEl.querySelector('.answer-content');
     
-    // 현재 너비 저장 및 min-width로 설정하여 너비 유지
+    // Save current width and set as min-width to maintain width
     const currentWidth = contentDiv.offsetWidth;
     contentDiv.style.minWidth = currentWidth + 'px';
     
     const originalContent = message.content;
     
-    // textarea로 교체
+    // Replace with textarea
     contentDiv.innerHTML = `
         <textarea class="edit-textarea">${escapeHtml(originalContent)}</textarea>
         <div class="edit-actions">
@@ -2216,7 +2059,7 @@ async function editMessage(index) {
     
     const textarea = contentDiv.querySelector('.edit-textarea');
     
-    // 내용에 맞게 높이 자동 조절
+    // Auto-adjust height to fit content
     function autoResize() {
         textarea.style.height = 'auto';
         textarea.style.height = textarea.scrollHeight + 'px';
@@ -2227,7 +2070,7 @@ async function editMessage(index) {
     textarea.focus();
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
     
-    // Enter로 저장, ESC로 취소
+    // Save with Enter, cancel with ESC
     textarea.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -2252,18 +2095,6 @@ async function saveEdit(index) {
     editingIndex = -1;
     
     // Truncate and send
-    if (DEMO_MODE) {
-        // Demo mode: truncate local messages
-        const conv = conversations.find(c => c.id === currentConversationId);
-        if (conv && conv.messages) {
-            conv.messages = conv.messages.slice(0, index);
-            currentMessages = [...conv.messages];
-        }
-        renderMessages(currentMessages);
-        await sendMessage(newContent);
-        return;
-    }
-    
     try {
         const response = await fetch(`/api/conversation/${currentConversationId}/truncate`, {
             method: 'POST',
@@ -2272,11 +2103,11 @@ async function saveEdit(index) {
         });
         
         if (response.ok) {
-            // UI 먼저 업데이트 (이전 메시지들 삭제 반영)
+            // Update UI first (reflect deletion of previous messages)
             await loadConversation(currentConversationId);
         }
         
-        // 그 다음 새 메시지 전송
+        // Then send new message
         await sendMessage(newContent);
     } catch (error) {
         console.error('Error saving edit:', error);
@@ -2296,7 +2127,7 @@ async function copyMessage(index) {
     
     try {
         await navigator.clipboard.writeText(message.content);
-        // 간단한 피드백 (버튼 아이콘 변경)
+        // Simple feedback (change button icon)
         const btn = document.querySelector(`.message:nth-child(${index + 1}) .message-action-btn[onclick*="copyMessage"]`);
         if (btn) {
             const originalHTML = btn.innerHTML;
@@ -2317,25 +2148,14 @@ async function copyMessage(index) {
 async function deleteFromMessage(index) {
     if (!currentConversationId) return;
     
-    // 생성 중이면 먼저 중지
+    // Stop first if generating
     if (isStreaming) {
         stopGeneration();
-        await new Promise(r => setTimeout(r, 500));  // 잠시 대기
+        await new Promise(r => setTimeout(r, 500));  // Brief wait
     }
     
-    // 확인 다이얼로그
+    // Confirmation dialog
     if (!confirm('Delete this message and all following messages?')) return;
-    
-    if (DEMO_MODE) {
-        // Demo mode: truncate local messages
-        const conv = conversations.find(c => c.id === currentConversationId);
-        if (conv && conv.messages) {
-            conv.messages = conv.messages.slice(0, index);
-            currentMessages = [...conv.messages];
-        }
-        renderMessages(currentMessages);
-        return;
-    }
     
     try {
         const response = await fetch(`/api/conversation/${currentConversationId}/truncate`, {
@@ -2363,18 +2183,6 @@ async function regenerateFrom(index) {
     
     // Truncate from the user message (index - 1)
     // sendMessage will re-add the user message
-    if (DEMO_MODE) {
-        // Demo mode: truncate and regenerate
-        const conv = conversations.find(c => c.id === currentConversationId);
-        if (conv && conv.messages) {
-            conv.messages = conv.messages.slice(0, index - 1);
-            currentMessages = [...conv.messages];
-        }
-        renderMessages(currentMessages);
-        await sendMessage(userContent);
-        return;
-    }
-    
     try {
         const response = await fetch(`/api/conversation/${currentConversationId}/truncate`, {
             method: 'POST',
@@ -2423,17 +2231,6 @@ async function saveRename() {
     const newName = document.getElementById('renameInput').value.trim();
     if (!newName) return;
     
-    if (DEMO_MODE) {
-        // Demo mode: rename in local array
-        const conv = conversations.find(c => c.id === currentConversationId);
-        if (conv) {
-            conv.title = newName;
-        }
-        renderConversationsList();
-        closeModal('renameModal');
-        return;
-    }
-    
     try {
         const response = await fetch(`/api/conversation/${currentConversationId}/rename`, {
             method: 'POST',
@@ -2453,12 +2250,6 @@ async function saveRename() {
 
 // System Prompt Modal
 document.getElementById('systemPromptBtn').addEventListener('click', async () => {
-    if (DEMO_MODE) {
-        document.getElementById('systemPromptInput').value = 'You are a helpful AI assistant for biomedical research.';
-        openModal('systemPromptModal');
-        return;
-    }
-    
     try {
         const response = await fetch('/api/system_prompt');
         if (!response.ok) throw new Error('Failed to get system prompt');
@@ -2473,11 +2264,6 @@ document.getElementById('systemPromptBtn').addEventListener('click', async () =>
 
 async function saveSystemPrompt() {
     const systemPrompt = document.getElementById('systemPromptInput').value;
-    
-    if (DEMO_MODE) {
-        closeModal('systemPromptModal');
-        return;
-    }
     
     try {
         const response = await fetch('/api/system_prompt', {
@@ -2497,67 +2283,72 @@ async function saveSystemPrompt() {
 
 // Settings Modal
 document.getElementById('settingsBtn').addEventListener('click', async () => {
-    // Demo mode: use default settings
-    const data = DEMO_MODE ? { temperature: 1.0, max_length: 32768, top_k: 50, max_context: 32768 } : null;
-    
-    if (!DEMO_MODE) {
-        try {
-            const response = await fetch('/api/settings');
-            if (!response.ok) throw new Error('Failed to get settings');
-            Object.assign(data, await response.json());
-        } catch (error) {
-            console.error('Error getting settings:', error);
-            return;
+    try {
+        const response = await fetch('/api/settings');
+        if (!response.ok) throw new Error('Failed to get settings');
+        
+        const data = await response.json();
+        // Highlight current theme button
+        const currentTheme = getTheme();
+        document.querySelectorAll('.theme-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === currentTheme);
+        });
+        // Update background image preview
+        updateBgPreview();
+        // Update blur slider value
+        const blur = getBgBlur();
+        document.getElementById('settingBlur').value = blur;
+        document.getElementById('blurValue').textContent = blur;
+        // Update opacity slider value
+        const opacity = getBgOpacity();
+        document.getElementById('settingOpacity').value = opacity;
+        document.getElementById('opacityValue').textContent = opacity;
+        
+        document.getElementById('settingUserName').value = getUserDisplayName();
+        document.getElementById('settingTemperature').value = data.temperature || 1.0;
+        document.getElementById('settingMaxLength').value = data.max_length || 32768;
+        document.getElementById('settingTopK').value = data.top_k || 50;
+        
+        // Update Max Images slider value
+        const maxImages = getMaxImages();
+        document.getElementById('settingMaxImages').value = maxImages;
+        document.getElementById('maxImagesValue').textContent = maxImages;
+        
+        // Update Max Context value
+        const maxContext = data.max_context || 32768;
+        document.getElementById('settingMaxContext').value = maxContext;
+        document.getElementById('maxContextWarning').style.display = 'none';
+        
+        // Populate language selector
+        const langSelect = document.getElementById('settingLanguage');
+        langSelect.innerHTML = '';
+        for (const lang of getAvailableLanguages()) {
+            const opt = document.createElement('option');
+            opt.value = lang.code;
+            opt.textContent = lang.name;
+            langSelect.appendChild(opt);
         }
+        langSelect.value = getCurrentLanguage();
+        
+        openModal('settingsModal');
+    } catch (error) {
+        console.error('Error getting settings:', error);
     }
-    
-    // 현재 테마 버튼 강조
-    const currentTheme = getTheme();
-    document.querySelectorAll('.theme-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.theme === currentTheme);
-    });
-    // 배경 이미지 미리보기 업데이트
-    updateBgPreview();
-    // 블러 슬라이더 값 업데이트
-    const blur = getBgBlur();
-    document.getElementById('settingBlur').value = blur;
-    document.getElementById('blurValue').textContent = blur;
-    // 투명도 슬라이더 값 업데이트
-    const opacity = getBgOpacity();
-    document.getElementById('settingOpacity').value = opacity;
-    document.getElementById('opacityValue').textContent = opacity;
-    
-    document.getElementById('settingUserName').value = getUserDisplayName();
-    document.getElementById('settingTemperature').value = data.temperature || 1.0;
-    document.getElementById('settingMaxLength').value = data.max_length || 32768;
-    document.getElementById('settingTopK').value = data.top_k || 50;
-    
-    // Max Images 슬라이더 값 업데이트
-    const maxImages = getMaxImages();
-    document.getElementById('settingMaxImages').value = maxImages;
-    document.getElementById('maxImagesValue').textContent = maxImages;
-    
-    // Max Context 값 업데이트
-    const maxContext = data.max_context || 32768;
-    document.getElementById('settingMaxContext').value = maxContext;
-    document.getElementById('maxContextWarning').style.display = 'none';
-    
-    openModal('settingsModal');
 });
 
-// 테마 버튼 클릭 이벤트 (즉시 적용 및 저장)
+// Theme button click event (apply and save immediately)
 document.querySelectorAll('.theme-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-        // 모든 버튼에서 active 제거
+        // Remove active from all buttons
         document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
-        // 클릭된 버튼에 active 추가
+        // Add active to clicked button
         btn.classList.add('active');
-        // 테마 적용
+        // Apply theme
         setTheme(btn.dataset.theme);
     });
 });
 
-// 배경 이미지 파일 선택 이벤트
+// Background image file selection event
 document.getElementById('bgImageInput').addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -2570,27 +2361,27 @@ document.getElementById('bgImageInput').addEventListener('change', (e) => {
     }
 });
 
-// 블러 슬라이더 이벤트 (실시간 적용)
+// Blur slider event (apply in real-time)
 document.getElementById('settingBlur').addEventListener('input', (e) => {
     const value = e.target.value;
     document.getElementById('blurValue').textContent = value;
     setBgBlur(value);
 });
 
-// 투명도 슬라이더 이벤트 (실시간 적용)
+// Opacity slider event (apply in real-time)
 document.getElementById('settingOpacity').addEventListener('input', (e) => {
     const value = e.target.value;
     document.getElementById('opacityValue').textContent = value;
     setBgOpacity(value);
 });
 
-// Max Images 슬라이더 이벤트
+// Max Images slider event
 document.getElementById('settingMaxImages').addEventListener('input', (e) => {
     const value = e.target.value;
     document.getElementById('maxImagesValue').textContent = value;
 });
 
-// Max Context 입력 이벤트 (256k 초과 경고)
+// Max Context input event (warn if exceeds 256k)
 document.getElementById('settingMaxContext').addEventListener('input', (e) => {
     const value = parseInt(e.target.value);
     const warning = document.getElementById('maxContextWarning');
@@ -2618,16 +2409,13 @@ async function saveSettings() {
         maxContext = 1024;
     }
     
-    // Save user name to localStorage
     setUserDisplayName(userName);
-    
-    // Save maxImages to localStorage
     localStorage.setItem('maxImages', maxImages.toString());
     
-    if (DEMO_MODE) {
-        // Demo mode: just close modal
-        closeModal('settingsModal');
-        return;
+    // Apply language change
+    const selectedLang = document.getElementById('settingLanguage').value;
+    if (selectedLang !== getCurrentLanguage()) {
+        await setLanguage(selectedLang);
     }
     
     try {
@@ -2695,8 +2483,19 @@ function createPlanStepsBox(toolCall) {
     const goal = args.goal || '';
     const steps = args.steps || [];
     
-    // Goal header
-    let goalHTML = goal ? `<div class="plan-goal">${escapeHtml(goal)}</div>` : '';
+    // Goal header with plan reference button
+    let goalHTML = goal ? `
+        <div class="plan-goal plan-goal-row">
+            <span class="plan-goal-text">${escapeHtml(goal)}</span>
+            <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="${t('tooltip.plan_ref')}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+            </button>
+        </div>
+    ` : '';
     
     // Steps with result placeholders and toggle
     let stepsHTML = '';
@@ -2713,19 +2512,19 @@ function createPlanStepsBox(toolCall) {
                         </div>
                     </div>
                     <div class="step-actions">
-                        <button class="step-action-btn" onclick="event.stopPropagation(); retryStep(${stepNum})" title="재시도">
+                        <button class="step-action-btn" onclick="event.stopPropagation(); retryStep(${stepNum})" title="${t('tooltip.retry')}">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M23 4v6h-6M1 20v-6h6"/>
                                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                             </svg>
                         </button>
-                        <button class="step-action-btn" onclick="event.stopPropagation(); editStepResult(${stepNum})" title="결과 수정">
+                        <button class="step-action-btn" onclick="event.stopPropagation(); editStepResult(${stepNum})" title="${t('tooltip.edit_result')}">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                             </svg>
                         </button>
-                        <button class="step-action-btn" onclick="event.stopPropagation(); askAboutStep(${stepNum})" title="질문하기">
+                        <button class="step-action-btn" onclick="event.stopPropagation(); askAboutStep(${stepNum})" title="${t('tooltip.ask')}">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"/>
                                 <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
@@ -2772,14 +2571,14 @@ function toggleThinkSection(toggle) {
 }
 
 // ============================================
-// Step Action Functions (재시도, 수정, 질문)
+// Step Action Functions (retry, edit, question)
 // ============================================
 
-// Store for step edits (수정된 결과 저장 - 재전송 아님!)
+// Store for step edits (save edited result - not resend!)
 let stepEdits = {};
 
 /**
- * Retry a step (재시도 - LLM이 tool select부터 다시 진행)
+ * Retry a step (LLM re-proceeds from tool select)
  */
 async function retryStep(stepNum) {
     if (!currentConversationId || isStreaming) return;
@@ -2815,7 +2614,7 @@ async function retryStep(stepNum) {
         // Show loading state
         step.classList.remove('completed', 'error');
         step.classList.add('running');
-        resultEl.innerHTML = '<div class="step-loading">LLM이 재생성 중...</div>';
+        resultEl.innerHTML = '<div class="step-loading">' + t('status.regenerating') + '</div>';
         resultEl.style.display = 'block';
         
         const response = await fetch('/retry_step', {
@@ -2861,7 +2660,7 @@ async function retryStep(stepNum) {
                             
                             // Tool call started
                             if (data.tool_call) {
-                                resultEl.innerHTML = `<div class="step-loading">${data.tool_call.name} 실행 중...</div>`;
+                                resultEl.innerHTML = '<div class="step-loading">' + t('status.executing', {name: data.tool_call.name}) + '</div>';
                             }
                             
                             // Tool result received
@@ -2896,13 +2695,13 @@ async function retryStep(stepNum) {
         console.error('Retry step error:', error);
         step.classList.remove('running');
         step.classList.add('error');
-        resultEl.innerHTML = `<div class="step-error">재시도 실패: ${escapeHtml(error.message)}</div>`;
+        resultEl.innerHTML = '<div class="step-error">' + t('error.retry_failed', {message: escapeHtml(error.message)}) + '</div>';
     }
 }
 
 /**
- * Edit step result (결과 수정 UI 표시 - 재전송이 아닌 저장만!)
- * Think와 메타데이터(token/시간)는 수정 불가
+ * Edit step result (show edit UI - only save, not resend!)
+ * Think and metadata (token/time) cannot be edited
  */
 function editStepResult(stepNum) {
     const step = document.querySelector(`.plan-step[data-step-id="${stepNum}"]`);
@@ -2939,10 +2738,10 @@ function editStepResult(stepNum) {
     const editContainer = document.createElement('div');
     editContainer.className = 'step-edit-container';
     editContainer.innerHTML = `
-        <textarea class="step-edit-textarea" placeholder="결과를 수정하거나 보완하세요...">${escapeHtml(editableText)}</textarea>
+        <textarea class="step-edit-textarea" placeholder="${t('placeholder.edit_result')}">${escapeHtml(editableText)}</textarea>
         <div class="step-edit-actions">
-            <button class="step-edit-btn cancel" onclick="cancelStepEdit(${stepNum})">취소</button>
-            <button class="step-edit-btn save" onclick="saveStepEdit(${stepNum})">저장</button>
+            <button class="step-edit-btn cancel" onclick="cancelStepEdit(${stepNum})">${t('label.cancel')}</button>
+            <button class="step-edit-btn save" onclick="saveStepEdit(${stepNum})">${t('label.save')}</button>
         </div>
     `;
     
@@ -2957,7 +2756,7 @@ function editStepResult(stepNum) {
 }
 
 /**
- * Save step edit (수정 내용 저장 - 재전송하지 않음!)
+ * Save step edit (save edited content - do not resend!)
  */
 function saveStepEdit(stepNum) {
     const step = document.querySelector(`.plan-step[data-step-id="${stepNum}"]`);
@@ -2968,7 +2767,7 @@ function saveStepEdit(stepNum) {
     const resultEl = step.querySelector('.step-result');
     
     if (textarea && textarea.value.trim()) {
-        // Save to stepEdits (메모리에 저장, 재전송 아님)
+        // Save to stepEdits (save to memory, not resend)
         stepEdits[stepNum] = textarea.value.trim();
         
         // Add edited badge to step name if not exists
@@ -2976,7 +2775,7 @@ function saveStepEdit(stepNum) {
         if (stepName && !stepName.querySelector('.step-edited-badge')) {
             const badge = document.createElement('span');
             badge.className = 'step-edited-badge';
-            badge.textContent = '수정됨';
+            badge.textContent = t('label.modified');
             stepName.appendChild(badge);
         }
     }
@@ -3001,7 +2800,7 @@ function cancelStepEdit(stepNum) {
 }
 
 /**
- * Ask about entire plan (Plan 전체 참고하여 질문)
+ * Ask about entire plan (ask referencing the full Plan)
  */
 function askAboutPlan(btn) {
     const planBox = btn.closest('.plan-steps-box');
@@ -3023,7 +2822,7 @@ function askAboutPlan(btn) {
     currentStepQuestion = { 
         stepNum: 0,  // 0 = plan level
         tool: 'plan',
-        stepName: 'Plan 전체',
+        stepName: t('label.entire_plan'),
         context: '',
         previousSteps: [],
         planGoal,
@@ -3034,19 +2833,19 @@ function askAboutPlan(btn) {
     const inputTags = document.getElementById('inputTags');
     inputTags.innerHTML = `
         <span class="input-tag" data-step="plan">
-            Plan 전체
+            ${t('label.entire_plan')}
             <span class="input-tag-remove" onclick="removeStepTag()">×</span>
         </span>
     `;
     
     messageInput.value = '';
-    messageInput.placeholder = 'Plan 전체에 대해 질문하세요...';
+    messageInput.placeholder = t('placeholder.plan_question');
     messageInput.focus();
     messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 /**
- * Ask about step (메인 입력창에 태그 추가 방식)
+ * Ask about step (add tag to main input field)
  */
 function askAboutStep(stepNum) {
     const step = document.querySelector(`.plan-step[data-step-id="${stepNum}"]`);
@@ -3090,8 +2889,8 @@ function askAboutStep(stepNum) {
     currentStepQuestion = { 
         stepNum, tool, stepName, context, 
         previousSteps,
-        planGoal,      // Plan 목표
-        planSteps      // 전체 plan 구조 (새 plan 작성 시 참고용)
+        planGoal,      // Plan goal
+        planSteps      // Full plan structure (for reference when creating new plan)
     };
     
     // Add tag pill (instead of text)
@@ -3105,7 +2904,7 @@ function askAboutStep(stepNum) {
     
     // Clear input and focus
     messageInput.value = '';
-    messageInput.placeholder = `Step ${stepNum}에 대해 질문하세요...`;
+    messageInput.placeholder = t('placeholder.step_question', {num: stepNum});
     messageInput.focus();
     
     // Scroll to input area
@@ -3150,7 +2949,7 @@ async function sendStepQuestion(stepNum) {
     // Create answer container
     const answerDiv = document.createElement('div');
     answerDiv.className = 'step-question-answer';
-    answerDiv.innerHTML = '<span class="loading-dots">답변 생성 중...</span>';
+    answerDiv.innerHTML = '<span class="loading-dots">' + t('status.generating_answer') + '</span>';
     step.appendChild(answerDiv);
     
     try {
@@ -3200,7 +2999,7 @@ async function sendStepQuestion(stepNum) {
         }
     } catch (error) {
         console.error('Step question error:', error);
-        answerDiv.innerHTML = `<span class="error">오류: ${escapeHtml(error.message)}</span>`;
+        answerDiv.innerHTML = '<span class="error">' + t('error.generic', {message: escapeHtml(error.message)}) + '</span>';
     } finally {
         input.disabled = false;
         if (sendBtn) sendBtn.disabled = false;
@@ -3209,11 +3008,11 @@ async function sendStepQuestion(stepNum) {
 }
 
 /**
- * Send step question from main input (메인 입력창에서 @StepN: 태그로 질문)
+ * Send step question from main input (question with @StepN: tag)
  */
 async function sendStepQuestionFromMain(question) {
     if (!currentStepQuestion || !currentConversationId) {
-        // tag 제거하고 return
+        // Remove tag and return
         document.getElementById('inputTags').innerHTML = '';
         messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
         currentStepQuestion = null;
@@ -3226,7 +3025,7 @@ async function sendStepQuestionFromMain(question) {
     messageInput.value = '';
     messageInput.style.height = 'auto';
     
-    // 바로 tag 제거 (보내는 시점에)
+    // Remove tag immediately (at send time)
     document.getElementById('inputTags').innerHTML = '';
     messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
     
@@ -3258,7 +3057,7 @@ async function sendStepQuestionFromMain(question) {
     // Safety check
     if (!contentDiv) {
         console.error('contentDiv not found in assistant message');
-        // tag 제거하고 return
+        // Remove tag and return
         document.getElementById('inputTags').innerHTML = '';
         messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
         currentStepQuestion = null;
@@ -3314,7 +3113,7 @@ async function sendStepQuestionFromMain(question) {
                                 scrollToBottom();
                             }
                             if (data.error) {
-                                contentDiv.innerHTML = `<span class="error">오류: ${escapeHtml(data.error)}</span>`;
+                                contentDiv.innerHTML = '<span class="error">' + t('error.generic', {message: escapeHtml(data.error)}) + '</span>';
                             }
                         } catch (e) {}
                     }
@@ -3331,19 +3130,39 @@ async function sendStepQuestionFromMain(question) {
             // Reload sidebar to show updated conversation
             loadConversations();
         } else {
-            contentDiv.innerHTML = '<span class="error">요청 실패</span>';
+            contentDiv.innerHTML = '<span class="error">' + t('error.request_failed') + '</span>';
         }
     } catch (error) {
         console.error('Step question error:', error);
-        contentDiv.innerHTML = `<span class="error">오류: ${escapeHtml(error.message)}</span>`;
+        contentDiv.innerHTML = '<span class="error">' + t('error.generic', {message: escapeHtml(error.message)}) + '</span>';
     } finally {
         isStreaming = false;
         setStreamingUI(false);
         currentStepQuestion = null;
-        // 확실하게 tag 제거
+        // Ensure tag is removed
         document.getElementById('inputTags').innerHTML = '';
         messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
     }
+}
+
+/**
+ * Merge multiple tool results for the same step into a per-step map.
+ * Backend stores all_results as a flat array where the same step number
+ * can appear multiple times when a step triggers several tool calls.
+ */
+function mergeResultsByStep(results) {
+    const map = {};
+    for (const r of results) {
+        if (!map[r.step]) {
+            map[r.step] = { ...r, _merged: [r] };
+        } else {
+            const m = map[r.step];
+            m._merged.push(r);
+            if (r.success === false) m.success = false;
+            if (r.stopped) m.stopped = true;
+        }
+    }
+    return map;
 }
 
 /**
@@ -3352,34 +3171,58 @@ async function sendStepQuestionFromMain(question) {
  */
 function formatStepResult(toolResult) {
     if (!toolResult) return '';
-    
+
     let html = '';
-    
-    // Handle string result (legacy)
+
     if (typeof toolResult === 'string') {
-        return `<div class="section-text">${escapeHtml(toolResult)}</div>`;
+        return `<div class="section-text">${renderMarkdown(toolResult)}</div>`;
     }
-    
-    // Thought section - collapsible "Think" (light gray, collapsed by default)
+
     if (toolResult.thought) {
         html += `
             <div class="think-section-minimal collapsed">
                 <span class="think-toggle" onclick="toggleThinkSection(this)">Think ▶</span>
-                <div class="think-content">${escapeHtml(toolResult.thought)}</div>
+                <div class="think-content">${renderMarkdown(toolResult.thought)}</div>
             </div>
         `;
     }
-    
-    // Action section - removed from UI (shown only in terminal DEBUG)
-    
-    // Result section (결과) - minimal
+
+    if (toolResult.error) {
+        html += `<div class="step-error">${escapeHtml(toolResult.error)}</div>`;
+    }
+
     const result = toolResult.result || toolResult;
+
+    // If the result contains code (code_gen), show summary and execution results
+    if (result && result.code) {
+        const lineCount = result.code.split('\n').length;
+        const execId = 'exec-' + Math.random().toString(36).slice(2, 9);
+        let fixInfo = '';
+        if (result.fix_attempts > 0) {
+            fixInfo = `<div class="code-fix-info">Auto-corrected (${result.fix_attempts} ${result.fix_attempts === 1 ? 'retry' : 'retries'})</div>`;
+        }
+        html += `<div class="step-section-minimal">
+            <span class="section-label-minimal">Code Generated</span>
+            <div class="code-gen-summary">${lineCount} lines of ${escapeHtml(result.language || 'python')} (view in Code tab)</div>
+            ${fixInfo}
+            <div class="step-exec-result" id="${execId}"></div>
+        </div>`;
+        if (result.execution) {
+            setTimeout(() => {
+                const container = document.getElementById(execId);
+                if (container) container.innerHTML = renderExecutionResult(result.execution);
+            }, 50);
+        } else if (toolResult.step) {
+            setTimeout(() => autoExecuteCode(toolResult.step - 1, result.code, result.language || 'python', execId), 100);
+        }
+        return html;
+    }
+
     if (result && (result.title || result.details)) {
-        const detailsHtml = result.details && Array.isArray(result.details) 
-            ? `<ul class="result-details-minimal">${result.details.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul>` 
+        const detailsHtml = result.details && Array.isArray(result.details)
+            ? `<ul class="result-details-minimal">${result.details.map(d => `<li>${renderMarkdown(d)}</li>`).join('')}</ul>`
             : '';
-        
-        // Graph output if available
+
         let graphHtml = '';
         if (result.has_graph) {
             if (result.graph_type === 'efficiency') {
@@ -3388,25 +3231,132 @@ function formatStepResult(toolResult) {
                 graphHtml = createTimelineChart(result);
             }
         }
-        
-        const metaHtml = (result.duration || result.tokens) 
+
+        const metaHtml = (result.duration || result.tokens)
             ? `<div class="result-meta-minimal">${result.duration || ''}${result.duration && result.tokens ? ' · ' : ''}${result.tokens ? result.tokens + ' tokens' : ''}</div>`
             : '';
-        
+
         html += `
             <div class="step-section-minimal">
-                <span class="section-label-minimal">${escapeHtml(result.title || '결과')}</span>
+                <span class="section-label-minimal">${escapeHtml(result.title || t('label.result'))}</span>
                 ${detailsHtml}
                 ${graphHtml}
                 ${metaHtml}
             </div>
         `;
     } else if (!html && result) {
-        // Fallback to JSON if no structured content
         html = `<pre class="result-json">${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
     }
-    
+
     return html;
+}
+
+function renderExecutionResult(execution) {
+    if (!execution) return '';
+    let html = '';
+    if (execution.stdout && execution.stdout.trim()) {
+        html += `<pre class="code-stdout">${escapeHtml(execution.stdout)}</pre>`;
+    }
+    if (execution.figures && execution.figures.length) {
+        html += execution.figures.map(f => `<img src="${f}" class="code-result-img">`).join('');
+    }
+    if (execution.tables && execution.tables.length) {
+        const tblId = 'tbl-' + Math.random().toString(36).slice(2, 9);
+        html += `<div id="${tblId}" class="code-result-tables"></div>`;
+        setTimeout(() => {
+            const tblContainer = document.getElementById(tblId);
+            if (tblContainer) {
+                execution.tables.forEach(csvUrl => loadCsvTable(csvUrl, tblContainer));
+            }
+        }, 50);
+    }
+    if (execution.stderr && execution.stderr.trim()) {
+        html += `<pre class="code-error">${escapeHtml(execution.stderr)}</pre>`;
+    }
+    return html;
+}
+
+async function autoExecuteCode(stepIndex, code, language, execContainerId) {
+    if (!currentConversationId) return;
+    try {
+        const res = await fetch('/api/execute_code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code, language, conv_id: currentConversationId, step_index: stepIndex })
+        });
+        const data = await res.json();
+        const container = document.getElementById(execContainerId);
+        if (container) {
+            let html = '';
+            if (data.stdout && data.stdout.trim()) {
+                html += `<pre class="code-stdout">${escapeHtml(data.stdout)}</pre>`;
+            }
+            if (data.figures && data.figures.length) {
+                html += data.figures.map(f => `<img src="${f}" class="code-result-img">`).join('');
+            }
+            if (data.tables && data.tables.length) {
+                data.tables.forEach(csvUrl => {
+                    loadCsvTable(csvUrl, container);
+                });
+            }
+            if (data.stderr && data.stderr.trim()) {
+                html += `<pre class="code-error">${escapeHtml(data.stderr)}</pre>`;
+            }
+            container.innerHTML = html;
+        }
+        // Also refresh code tab if visible
+        const codeContent = document.getElementById('codeContent');
+        if (codeContent) {
+            const block = codeContent.querySelector(`.code-block[data-step="${stepIndex}"]`);
+            if (block) {
+                const resultDiv = block.querySelector('.code-result');
+                if (resultDiv) displayCodeResult(resultDiv, data);
+            }
+        }
+    } catch (e) {
+        console.warn('Auto-execute code failed:', e);
+    }
+}
+
+async function loadSavedOutputsForPlanBox() {
+    if (!currentConversationId) return;
+    const planBox = document.querySelector('.completed-plan');
+    if (!planBox) return;
+    const stepEls = planBox.querySelectorAll('.plan-step[data-step-id]');
+    for (const stepEl of stepEls) {
+        const stepNum = parseInt(stepEl.dataset.stepId);
+        const stepIndex = stepNum - 1;
+        try {
+            const res = await fetch(`/api/outputs/${currentConversationId}/step_${stepIndex}`);
+            const data = await res.json();
+            if ((!data.figures || !data.figures.length) && (!data.tables || !data.tables.length)) continue;
+            let resultEl = stepEl.querySelector('.step-result');
+            if (!resultEl) {
+                resultEl = document.createElement('div');
+                resultEl.className = 'step-result';
+                resultEl.style.display = 'block';
+                stepEl.appendChild(resultEl);
+            }
+            let execDiv = resultEl.querySelector('.step-exec-result');
+            if (!execDiv) {
+                execDiv = document.createElement('div');
+                execDiv.className = 'step-exec-result';
+                resultEl.appendChild(execDiv);
+            }
+            let html = '';
+            if (data.figures && data.figures.length) {
+                html += data.figures.map(f => `<img src="${f}" class="code-result-img">`).join('');
+            }
+            execDiv.innerHTML = html;
+            if (data.tables && data.tables.length) {
+                for (const csvUrl of data.tables) {
+                    await loadCsvTable(csvUrl, execDiv);
+                }
+            }
+        } catch (e) {
+            // No saved outputs
+        }
+    }
 }
 
 /**
@@ -3447,13 +3397,30 @@ function updatePlanStepResult(toolName, toolResult) {
         stepEl.dataset.tool = toolName;
     }
     
-    // Show result - pass full toolResult to get thought, action, and result
+    // Show result - append if results already exist (multi-tool step)
     const resultEl = stepEl.querySelector('.step-result');
     if (resultEl && toolResult) {
         resultEl.style.display = 'block';
-        resultEl.innerHTML = formatStepResult(toolResult);
-        
-        // Update toggle arrow to indicate content is available (▲ = expanded)
+        const newHtml = formatStepResult(toolResult);
+        if (resultEl.innerHTML.trim()) {
+            resultEl.innerHTML += '<hr class="tool-result-divider">' + newHtml;
+        } else {
+            resultEl.innerHTML = newHtml;
+        }
+
+        if (typeof renderMathInElement !== 'undefined') {
+            renderMathInElement(resultEl, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                    { left: '\\[', right: '\\]', display: true },
+                    { left: '\\(', right: '\\)', display: false }
+                ],
+                throwOnError: false
+            });
+        }
+
+        // Update toggle arrow to indicate content is available
         const toggle = stepEl.querySelector('.step-toggle');
         if (toggle) {
             toggle.style.visibility = 'visible';
@@ -3469,41 +3436,51 @@ function updatePlanStepResult(toolName, toolResult) {
  * Called when done event includes plan_complete
  */
 function updatePlanBoxWithResults(planBox, planData) {
-    const results = planData.results || [];
+    const mergedMap = mergeResultsByStep(planData.results || []);
     
-    results.forEach(r => {
-        const stepEl = planBox.querySelector(`[data-step-id="${r.step}"]`);
-        if (stepEl) {
-            // Update step status
-            stepEl.classList.remove('pending', 'running');
-            stepEl.classList.add(r.success ? 'completed' : 'error');
+    for (const [step, merged] of Object.entries(mergedMap)) {
+        const stepEl = planBox.querySelector(`[data-step-id="${step}"]`);
+        if (!stepEl) continue;
+        
+        stepEl.classList.remove('pending', 'running');
+        const stepStatus = merged.stopped ? 'stopped' : (merged.success ? 'completed' : 'error');
+        stepEl.classList.add(stepStatus);
+        
+        const indicator = stepEl.querySelector('.step-indicator');
+        if (indicator) {
+            indicator.textContent = merged.stopped ? '◼' : (merged.success ? '✓' : '!');
+        }
+        
+        const resultEl = stepEl.querySelector('.step-result');
+        const items = merged._merged || [merged];
+        const hasContent = items.some(r => r.thought || r.action || r.result || r.error);
+        if (resultEl && hasContent) {
+            resultEl.style.display = 'block';
+            resultEl.innerHTML = items.map(r => formatStepResult({
+                success: r.success,
+                thought: r.thought,
+                action: r.action,
+                error: r.error,
+                result: r.result
+            })).join('<hr class="tool-result-divider">');
             
-            // Update indicator
-            const indicator = stepEl.querySelector('.step-indicator');
-            if (indicator) {
-                indicator.textContent = r.success ? '✓' : '!';
-            }
-            
-            // Update result section with full data (thought, action, result)
-            const resultEl = stepEl.querySelector('.step-result');
-            if (resultEl && (r.thought || r.action || r.result)) {
-                resultEl.style.display = 'block';
-                resultEl.innerHTML = formatStepResult({
-                    success: r.success,
-                    thought: r.thought,
-                    action: r.action,
-                    result: r.result
-                });
-                
-                // Show toggle (▲ = expanded)
-                const toggle = stepEl.querySelector('.step-toggle');
-                if (toggle) {
-                    toggle.style.visibility = 'visible';
-                    toggle.textContent = '▲';
-                }
+            const toggle = stepEl.querySelector('.step-toggle');
+            if (toggle) {
+                toggle.style.visibility = 'visible';
+                toggle.textContent = '▲';
             }
         }
-    });
+    }
+    
+    // Set remaining steps to "stopped" if plan was stopped
+    if (planData.stopped) {
+        planBox.querySelectorAll('.plan-step.pending').forEach(stepEl => {
+            stepEl.classList.remove('pending');
+            stepEl.classList.add('stopped');
+            const indicator = stepEl.querySelector('.step-indicator');
+            if (indicator) indicator.textContent = '◼';
+        });
+    }
 }
 
 /**
@@ -3535,7 +3512,7 @@ function createToolCallBox(toolCall) {
         <div class="tool-call-header">
             <span class="tool-icon">${icon}</span>
             <span class="tool-name">${escapeHtml(toolCall.name)}</span>
-            <span class="tool-status ${toolCall.status || 'running'}">${toolCall.status === 'running' ? '실행 중...' : '완료'}</span>
+            <span class="tool-status ${toolCall.status || 'running'}">${toolCall.status === 'running' ? t('status.running') : t('status.completed')}</span>
         </div>
         <div class="tool-call-args">
             <pre>${escapeHtml(JSON.stringify(toolCall.arguments, null, 2))}</pre>
@@ -3570,7 +3547,7 @@ function updateToolResultBox(toolResult) {
     const statusEl = box.querySelector('.tool-status');
     if (statusEl) {
         statusEl.className = `tool-status ${toolResult.success ? 'completed' : 'error'}`;
-        statusEl.textContent = toolResult.success ? '완료' : '오류';
+        statusEl.textContent = toolResult.success ? t('status.completed') : t('status.error');
     }
     
     // Show result
@@ -3642,7 +3619,7 @@ function createEfficiencyChart(result) {
     
     return `
         <div class="mini-graph-container">
-            <div class="mini-graph-title">sgRNA 효율 점수 분포</div>
+            <div class="mini-graph-title">${t('label.sgrna_distribution')}</div>
             <div class="mini-chart">
                 ${barsHtml}
             </div>
@@ -3664,14 +3641,14 @@ function createTimelineChart(result) {
     if (result.experiment_type === 'crispr_screen' || !result.experiment_type) {
         const p1 = Math.ceil(weeks / 3);
         const p2 = Math.ceil(2 * weeks / 3);
-        phases.push({ weeks: p1, label: '클로닝', color: '#8B4513' });
-        phases.push({ weeks: p2 - p1, label: '형질도입', color: '#4A5568' });
-        phases.push({ weeks: weeks - p2, label: '분석', color: '#22C55E' });
+        phases.push({ weeks: p1, label: t('label.cloning'), color: '#8B4513' });
+        phases.push({ weeks: p2 - p1, label: t('label.transduction'), color: '#4A5568' });
+        phases.push({ weeks: weeks - p2, label: t('label.analysis'), color: '#22C55E' });
     } else {
         // Generic phases
         const half = Math.ceil(weeks / 2);
-        phases.push({ weeks: half, label: '준비', color: '#8B4513' });
-        phases.push({ weeks: weeks - half, label: '실행', color: '#22C55E' });
+        phases.push({ weeks: half, label: t('label.preparation'), color: '#8B4513' });
+        phases.push({ weeks: weeks - half, label: t('label.execution'), color: '#22C55E' });
     }
     
     // Build week boxes
@@ -3689,7 +3666,7 @@ function createTimelineChart(result) {
     
     return `
         <div class="mini-graph-container">
-            <div class="mini-graph-title">${weeks}주 실험 타임라인</div>
+            <div class="mini-graph-title">${t('label.week_timeline', {weeks})}</div>
             <div class="mini-timeline">
                 ${weekBoxes}
             </div>
@@ -3727,7 +3704,7 @@ function createPlanBox(plan) {
     box.innerHTML = `
         <div class="plan-header">
             <span class="plan-icon">📋</span>
-            <span class="plan-title">실행 계획</span>
+            <span class="plan-title">${t('label.execution_plan')}</span>
             <span class="plan-progress">${plan.current_step || 0} / ${plan.total_steps || plan.steps?.length || 0}</span>
         </div>
         <div class="plan-goal">${escapeHtml(plan.goal || '')}</div>
@@ -3751,65 +3728,6 @@ function updatePlanStep(stepId, status) {
     const indicator = stepEl.querySelector('.step-indicator');
     if (indicator) {
         indicator.textContent = status === 'completed' ? '✓' : status === 'running' ? '···' : stepId;
-    }
-}
-
-/**
- * Animate plan steps completion (DEMO MODE)
- */
-async function animatePlanSteps(steps) {
-    const planBox = document.getElementById('current-plan-box');
-    if (!planBox) return;
-    
-    for (let i = 0; i < steps.length; i++) {
-        await new Promise(r => setTimeout(r, 800)); // 0.8초 대기
-        
-        const stepEl = planBox.querySelector(`.plan-step[data-step-id="${i + 1}"]`);
-        if (!stepEl) continue;
-        
-        // running 상태로 변경
-        stepEl.classList.remove('pending');
-        stepEl.classList.add('running');
-        const indicator = stepEl.querySelector('.step-indicator');
-        if (indicator) indicator.textContent = '···';
-        
-        await new Promise(r => setTimeout(r, 500)); // 0.5초 후 완료
-        
-        // completed 상태로 변경
-        stepEl.classList.remove('running');
-        stepEl.classList.add('completed');
-        if (indicator) indicator.textContent = '✓';
-        
-        // 결과 추가
-        const resultEl = stepEl.querySelector('.step-result');
-        if (resultEl && MOCK_STEP_RESULTS[i]) {
-            resultEl.innerHTML = `<div class="step-result-content">${MOCK_STEP_RESULTS[i].summary}</div>`;
-            resultEl.style.display = 'block';
-            
-            // toggle 버튼 보이기
-            const toggle = stepEl.querySelector('.step-toggle');
-            if (toggle) toggle.style.visibility = 'visible';
-        }
-        
-        // Detail Panel 데이터 업데이트
-        if (MOCK_STEP_OUTPUTS[i]) {
-            detailPanelData.results[i] = MOCK_STEP_OUTPUTS[i];
-            detailPanelData.currentStep = i + 1;
-        }
-        if (MOCK_STEP_CODES[i]) {
-            detailPanelData.codes[i] = MOCK_STEP_CODES[i];
-        }
-        
-        // Outputs 탭 업데이트
-        renderOutputs();
-        
-        // Code step selector 업데이트
-        updateCodeStepSelector();
-        
-        // All 뷰 업데이트 (currentCodeStep이 'all'이면)
-        if (currentCodeStep === 'all') {
-            renderCode('all');
-        }
     }
 }
 
@@ -3873,53 +3791,83 @@ function openDetailPanel(planData) {
     
     // Initialize data
     detailPanelData.goal = planData.goal || '';
+    detailPanelData.userMessage = planData.userMessage || '';
     detailPanelData.steps = planData.steps || [];
     detailPanelData.results = [];
     detailPanelData.codes = {};
-    detailPanelData.summaryCode = null;
     detailPanelData.analysis = '';
     detailPanelData.currentStep = 0;
+    currentCodeStep = null;
     
-    // Show panel
-    detailPanel.style.display = 'flex';
-    // Set CSS variable on :root for consistent usage across toggle and panel
-    document.documentElement.style.setProperty('--detail-panel-width', detailPanelWidth + 'px');
+    // Ensure panel is visible
+    showDetailPanelUI();
     
-    if (detailResizeHandle) {
-        detailResizeHandle.style.display = 'block';
+    // Hide empty states, show content
+    const planEmptyState = document.getElementById('planEmptyState');
+    if (planEmptyState) planEmptyState.style.display = 'none';
+    const graphEmptyState = document.getElementById('graphEmptyState');
+    if (graphEmptyState) graphEmptyState.style.display = 'none';
+    const nodeGraphContainer = document.getElementById('nodeGraphContainer');
+    if (nodeGraphContainer) nodeGraphContainer.style.display = '';
+    
+    // Show "executing plan" loading state (analysis will be generated after all steps complete)
+    const planLoading = document.getElementById('planLoading');
+    if (planLoading) {
+        planLoading.style.display = 'flex';
+        const loadingText = planLoading.querySelector('.loading-text');
+        if (loadingText) loadingText.textContent = t('status.executing_plan');
     }
     
+    // Create graph from plan data
+    if (nodeGraph) {
+        nodeGraph.createFromPlan(planData);
+        if (currentConversationId) {
+            const savedLayout = localStorage.getItem('graphLayout-' + currentConversationId);
+            if (savedLayout) {
+                try {
+                    const layout = JSON.parse(savedLayout);
+                    nodeGraph.applyLayout(layout, { skipPosition: true });
+                } catch (e) {}
+            }
+        }
+        const graphTabVisible = document.getElementById('tabGraph')?.style.display !== 'none';
+        if (graphTabVisible) {
+            setTimeout(() => {
+                nodeGraph._relayoutVertical();
+                nodeGraph.fitToView();
+                if (currentConversationId) {
+                    localStorage.setItem('graphLayout-' + currentConversationId, JSON.stringify(nodeGraph.getLayout()));
+                }
+                nodeGraph._needsLayout = null;
+            }, 100);
+        } else {
+            nodeGraph._needsLayout = 'full';
+        }
+        // Notify popout if open
+        broadcastGraphMessage({ type: 'plan-data', payload: planData });
+    }
+}
+
+function showDetailPanelUI() {
+    if (detailPanel) detailPanel.style.display = 'flex';
+    document.documentElement.style.setProperty('--detail-panel-width', detailPanelWidth + 'px');
+    if (detailResizeHandle) detailResizeHandle.style.display = 'block';
     if (detailToggle) {
         detailToggle.style.display = 'flex';
         detailToggle.classList.add('panel-open');
     }
-    
     detailPanelOpen = true;
-    
-    // Request initial analysis
-    requestAnalyzePlan();
-    
-    // Switch to Analysis Plan tab
-    switchDetailTab('plan');
 }
 
 /**
- * Close Detail Panel
+ * Close Detail Panel (hide, but can be toggled back)
  */
 function closeDetailPanel() {
     if (!detailPanel) return;
     
     detailPanel.style.display = 'none';
-    
-    if (detailResizeHandle) {
-        detailResizeHandle.style.display = 'none';
-    }
-    
-    if (detailToggle) {
-        detailToggle.classList.remove('panel-open');
-        // Keep toggle visible for reopening
-    }
-    
+    if (detailResizeHandle) detailResizeHandle.style.display = 'none';
+    if (detailToggle) detailToggle.classList.remove('panel-open');
     detailPanelOpen = false;
 }
 
@@ -3930,46 +3878,455 @@ function toggleDetailPanel() {
     if (detailPanelOpen) {
         closeDetailPanel();
     } else {
-        // Reopen panel
-        if (detailPanel) {
-            detailPanel.style.display = 'flex';
-            if (detailResizeHandle) {
-                detailResizeHandle.style.display = 'block';
-            }
-            if (detailToggle) {
-                detailToggle.classList.add('panel-open');
-            }
-            detailPanelOpen = true;
-        }
+        showDetailPanelUI();
     }
 }
 
 /**
- * Hide Detail Panel completely (when no plan)
+ * Reset Detail Panel to empty state (keep panel visible)
  */
 function hideDetailPanel() {
-    if (detailPanel) {
-        detailPanel.style.display = 'none';
-    }
-    if (detailResizeHandle) {
-        detailResizeHandle.style.display = 'none';
-    }
-    if (detailToggle) {
-        detailToggle.style.display = 'none';
-        detailToggle.classList.remove('panel-open');
-    }
-    detailPanelOpen = false;
-    
     // Reset detail panel data
     detailPanelData = {
         goal: '',
         steps: [],
         results: {},
         codes: {},
-        summaryCode: null,
         analysis: null,
         currentStep: 0
     };
+    
+    // Show empty states
+    const planEmptyState = document.getElementById('planEmptyState');
+    if (planEmptyState) planEmptyState.style.display = 'flex';
+    const graphEmptyState = document.getElementById('graphEmptyState');
+    if (graphEmptyState) graphEmptyState.style.display = 'flex';
+    const nodeGraphContainer = document.getElementById('nodeGraphContainer');
+    if (nodeGraphContainer) nodeGraphContainer.style.display = 'none';
+    
+    // Hide loading / content
+    const planLoading = document.getElementById('planLoading');
+    if (planLoading) planLoading.style.display = 'none';
+    const planContent = document.getElementById('planContent');
+    if (planContent) planContent.innerHTML = '';
+    const regeneratePlan = document.getElementById('regeneratePlan');
+    if (regeneratePlan) regeneratePlan.style.display = 'none';
+    
+    // Clear graph
+    if (nodeGraph) nodeGraph.clear();
+}
+
+/**
+ * Restore detail panel from saved conversation messages.
+ * Scans for the last [PLAN_COMPLETE] message and rebuilds the panel.
+ */
+function restoreDetailPanelFromMessages(messages) {
+    let lastPlanData = null;
+    let lastPlanMsgIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        if (msg.role === 'assistant' && msg.content) {
+            const match = msg.content.match(/\[PLAN_COMPLETE\]([\s\S]*)$/);
+            if (match) {
+                try {
+                    lastPlanData = JSON.parse(match[1].trim());
+                    lastPlanMsgIdx = i;
+                } catch (e) { /* ignore parse errors */ }
+                break;
+            }
+        }
+    }
+    
+    if (lastPlanData) {
+        for (let j = lastPlanMsgIdx - 1; j >= 0; j--) {
+            if (messages[j].role === 'user') {
+                lastPlanData.userMessage = (messages[j].content || '').replace(/\[Image: [^\]]+\]\s*/g, '').replace(/\[Audio: [^\]]+\]\s*/g, '').replace(/\[Document: [^\]]+\]\s*/g, '').trim();
+                break;
+            }
+        }
+        openDetailPanelFromSaved(lastPlanData);
+        return;
+    }
+    
+    let toolCallPlan = null;
+    let userGoal = '';
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        if (msg.role === 'assistant' && msg.content) {
+            const parsed = parseSpecialTokens(msg.content);
+            if (parsed.toolCalls && typeof parsed.toolCalls === 'object' && parsed.toolCalls.name === 'create_plan') {
+                toolCallPlan = parsed.toolCalls.arguments;
+                for (let j = i - 1; j >= 0; j--) {
+                    if (messages[j].role === 'user') {
+                        userGoal = (messages[j].content || '').replace(/\[Image: [^\]]+\]\s*/g, '').replace(/\[Audio: [^\]]+\]\s*/g, '').replace(/\[Document: [^\]]+\]\s*/g, '').trim();
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    
+    if (toolCallPlan) {
+        openDetailPanel({
+            goal: toolCallPlan.goal || userGoal || '',
+            userMessage: userGoal || '',
+            steps: (toolCallPlan.steps || []).map((s, i) => ({
+                id: i + 1,
+                name: s.name || '',
+                tool: s.tool || '',
+                description: s.description || ''
+            }))
+        });
+    } else {
+        hideDetailPanel();
+    }
+}
+
+/**
+ * Open detail panel from saved plan data (including results).
+ * Similar to openDetailPanel but restores completed results too.
+ */
+function openDetailPanelFromSaved(planData) {
+    if (!detailPanel) return;
+    
+    detailPanelData.goal = planData.goal || '';
+    detailPanelData.userMessage = planData.userMessage || '';
+    detailPanelData.steps = planData.steps || [];
+    
+    // Restore results indexed by step number (1-based -> 0-based)
+    const results = planData.results || [];
+    detailPanelData.results = [];
+    results.forEach(r => {
+        if (r.step) detailPanelData.results[r.step - 1] = r;
+    });
+    
+    detailPanelData.codes = {};
+    results.forEach(r => {
+        if (r.step && r.result?.code) {
+            detailPanelData.codes[r.step - 1] = {
+                language: r.result.language || 'python',
+                code: r.result.code
+            };
+        }
+    });
+    currentCodeStep = null;
+    detailPanelData.analysis = planData.analysis || '';
+    detailPanelData.currentStep = detailPanelData.steps.length;
+    
+    showDetailPanelUI();
+    
+    // Hide empty states, show content
+    const planEmptyState = document.getElementById('planEmptyState');
+    if (planEmptyState) planEmptyState.style.display = 'none';
+    const graphEmptyState = document.getElementById('graphEmptyState');
+    if (graphEmptyState) graphEmptyState.style.display = 'none';
+    const nodeGraphContainer = document.getElementById('nodeGraphContainer');
+    if (nodeGraphContainer) nodeGraphContainer.style.display = '';
+    
+    // Create graph from plan data
+    if (nodeGraph) {
+        nodeGraph.createFromPlan(planData);
+        // Set node statuses from results
+        results.forEach(r => {
+            if (r.step) {
+                const nodeId = `step-${r.step}`;
+                const status = r.stopped ? 'stopped' : (r.success ? 'completed' : 'error');
+                nodeGraph.setNodeStatus(nodeId, status);
+            }
+        });
+        // Set remaining steps to "stopped" if plan was stopped
+        if (planData.stopped) {
+            (planData.steps || []).forEach((step, index) => {
+                const stepNum = index + 1;
+                const hasResult = results.some(r => r.step === stepNum);
+                if (!hasResult) {
+                    nodeGraph.setNodeStatus(`step-${stepNum}`, 'stopped');
+                }
+            });
+        }
+        if (currentConversationId) {
+            const savedLayout = localStorage.getItem('graphLayout-' + currentConversationId);
+            if (savedLayout) {
+                try {
+                    const layout = JSON.parse(savedLayout);
+                    nodeGraph.applyLayout(layout, { skipPosition: true });
+                } catch (e) {}
+            }
+        }
+        const graphTabVisible = document.getElementById('tabGraph')?.style.display !== 'none';
+        if (graphTabVisible) {
+            setTimeout(() => {
+                nodeGraph._relayoutVertical();
+                nodeGraph.fitToView();
+                if (currentConversationId) {
+                    localStorage.setItem('graphLayout-' + currentConversationId, JSON.stringify(nodeGraph.getLayout()));
+                }
+                nodeGraph._needsLayout = null;
+            }, 100);
+        } else {
+            nodeGraph._needsLayout = 'full';
+        }
+        broadcastGraphMessage({ type: 'plan-data', payload: planData });
+    }
+    
+    // Restore saved analysis or request fresh one
+    if (detailPanelData.analysis) {
+        renderAnalysisPlan(detailPanelData.analysis);
+        const regenerateBtn = document.getElementById('regeneratePlan');
+        if (regenerateBtn) regenerateBtn.style.display = 'inline-flex';
+    } else {
+        const regenerateBtn = document.getElementById('regeneratePlan');
+        if (regenerateBtn) regenerateBtn.style.display = 'inline-flex';
+    }
+    renderOutputs();
+    updateCodeStepSelector();
+    setTimeout(() => loadSavedOutputsForPlanBox(), 200);
+}
+
+// ============================================
+// Mode Toggle
+// ============================================
+
+function applyModeToggle() {
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === currentMode);
+    });
+}
+
+// ============================================
+// Graph Popout & BroadcastChannel
+// ============================================
+
+let graphChannel = null;
+
+function setupGraphChannel() {
+    if (typeof BroadcastChannel === 'undefined') return;
+    graphChannel = new BroadcastChannel('node-graph');
+    graphChannel.onmessage = (e) => {
+        const { type, payload } = e.data;
+        switch (type) {
+            case 'popout-closed':
+                onGraphPopoutClosed();
+                break;
+            case 'graph-modified':
+                if (nodeGraph) nodeGraph.setState(payload);
+                break;
+            case 'rerun-plan':
+                rerunPlanFromGraph();
+                break;
+            case 'request-state':
+                broadcastGraphMessage({
+                    type: 'plan-data',
+                    payload: {
+                        goal: detailPanelData.goal,
+                        steps: detailPanelData.steps
+                    }
+                });
+                broadcastGraphMessage({
+                    type: 'graph-state',
+                    payload: nodeGraph ? nodeGraph.getState() : null
+                });
+                broadcastGraphMessage({
+                    type: 'theme-change',
+                    payload: getTheme()
+                });
+                break;
+        }
+    };
+}
+
+function broadcastGraphMessage(msg) {
+    if (graphChannel) graphChannel.postMessage(msg);
+}
+
+function openGraphPopout() {
+    if (graphPopoutWindow && !graphPopoutWindow.closed) {
+        graphPopoutWindow.focus();
+        return;
+    }
+    graphPopoutWindow = window.open('/graph.html', 'graphEditor', 'width=1200,height=800');
+    
+    // Show notice in detail panel, hide graph container
+    const notice = document.getElementById('graphPopoutNotice');
+    const container = document.getElementById('nodeGraphContainer');
+    if (notice) notice.style.display = 'flex';
+    if (container) container.style.display = 'none';
+}
+
+function onGraphPopoutClosed() {
+    graphPopoutWindow = null;
+    const notice = document.getElementById('graphPopoutNotice');
+    const container = document.getElementById('nodeGraphContainer');
+    if (notice) notice.style.display = 'none';
+    if (container) container.style.display = '';
+}
+
+async function rerunPlanFromGraph() {
+    if (!nodeGraph || !currentConversationId || isStreaming) return;
+
+    const executionPlan = nodeGraph.toExecutionPlan();
+    if (!executionPlan || !executionPlan.steps || executionPlan.steps.length === 0) return;
+
+    const logicChanged = nodeGraph.hasExecutionLogicChanged();
+
+    if (logicChanged) {
+        const oldPlanBox = document.getElementById('current-plan-box');
+        if (oldPlanBox) {
+            oldPlanBox.removeAttribute('id');
+            oldPlanBox.classList.add('plan-box-archived');
+        }
+
+        const toolCall = {
+            name: 'create_plan',
+            arguments: { goal: executionPlan.goal, steps: executionPlan.steps }
+        };
+        const newPlanBox = createPlanStepsBox(toolCall);
+
+        const assistantMsg = appendMessage({ role: 'assistant', content: '' });
+        const contentDiv = assistantMsg.querySelector('.message-content');
+        contentDiv.innerHTML = '';
+        contentDiv.appendChild(newPlanBox);
+
+        const planSteps = executionPlan.steps.map((s, i) => ({
+            id: i + 1,
+            name: s.name || '',
+            tool: s.tool || '',
+            description: s.description || ''
+        }));
+        openDetailPanel({ goal: executionPlan.goal, userMessage: detailPanelData.userMessage || '', steps: planSteps });
+    } else {
+        const planBox = document.getElementById('current-plan-box');
+        if (planBox) {
+            planBox.querySelectorAll('.plan-step').forEach(step => {
+                step.classList.remove('completed', 'running', 'error');
+                step.classList.add('pending');
+                const indicator = step.querySelector('.step-indicator');
+                if (indicator) indicator.textContent = step.dataset.stepId || '';
+                const result = step.querySelector('.step-result');
+                if (result) { result.style.display = 'none'; result.innerHTML = ''; }
+                const toggle = step.querySelector('.step-toggle');
+                if (toggle) toggle.style.visibility = 'hidden';
+            });
+        }
+    }
+
+    try {
+        const response = await fetch('/api/replan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversation_id: currentConversationId,
+                goal: executionPlan.goal,
+                steps: executionPlan.steps,
+                rerun: true
+            })
+        });
+        if (!response.ok) {
+            console.error('Replan failed:', response.statusText);
+            return;
+        }
+
+        isStreaming = true;
+        currentAbortController = new AbortController();
+        setStreamingUI(true);
+
+        const chatResponse = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversation_id: currentConversationId,
+                message: `[RERUN_PLAN] Execute the updated plan.`,
+                mode: currentMode
+            }),
+            signal: currentAbortController.signal
+        });
+
+        if (!chatResponse.ok) throw new Error('Rerun chat failed');
+
+        const reader = chatResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let fullContent = '';
+        let buffer = '';
+
+        const planBox = document.getElementById('current-plan-box');
+        const contentDiv = planBox?.closest('.message-content');
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    const data = JSON.parse(line.slice(6));
+
+                    if (data.tool_call && data.tool_call.name !== 'create_plan') {
+                        if (planBox) {
+                            const toolName = data.tool_call.name;
+                            const stepEl = planBox.querySelector(`.plan-step.pending[data-tool="${toolName}"]`) ||
+                                           planBox.querySelector(`.plan-step:not(.completed):not(.error)[data-tool="${toolName}"]`);
+                            if (stepEl && !stepEl.classList.contains('completed')) {
+                                stepEl.classList.remove('pending');
+                                stepEl.classList.add('running');
+                                void stepEl.offsetHeight;
+                            }
+                        }
+                    }
+
+                    if (data.tool_result) {
+                        updateToolResultBox(data.tool_result);
+                        if (detailPanelOpen && data.tool_result.step !== undefined) {
+                            addToolResultToDetailPanel(data.tool_result.step - 1, data.tool_result);
+                        }
+                        if (nodeGraph && data.tool_result.step !== undefined) {
+                            const status = data.tool_result.success ? 'completed' : 'error';
+                            nodeGraph.setNodeStatus(`step-${data.tool_result.step}`, status);
+                            broadcastGraphMessage({ type: 'step-update', payload: { step: data.tool_result.step, status } });
+                        }
+                    }
+
+                    if (data.step_start) {
+                        if (planBox) {
+                            const stepEl = planBox.querySelector(`[data-step-id="${data.step_start.step}"]`);
+                            if (stepEl && !stepEl.classList.contains('completed')) {
+                                stepEl.classList.remove('pending');
+                                stepEl.classList.add('running');
+                            }
+                        }
+                        if (nodeGraph) {
+                            nodeGraph.setNodeStatus(`step-${data.step_start.step}`, 'running');
+                        }
+                        broadcastGraphMessage({ type: 'step-update', payload: { step: data.step_start.step, status: 'running' } });
+                    }
+
+                    if (data.done) {
+                        if (data.plan_complete && planBox) {
+                            updatePlanBoxWithResults(planBox, data.plan_complete);
+                        }
+                        if (detailPanelOpen && data.plan_complete) {
+                            onPlanComplete();
+                        }
+                    }
+                } catch (e) {
+                    console.warn('SSE parse error during rerun:', e);
+                }
+            }
+        }
+    } catch (err) {
+        if (err.name !== 'AbortError') {
+            console.error('Rerun error:', err);
+        }
+    } finally {
+        isStreaming = false;
+        currentAbortController = null;
+        setStreamingUI(false);
+        nodeGraph?.snapshotExecutionPlanHash();
+    }
 }
 
 /**
@@ -3991,6 +4348,19 @@ function switchDetailTab(tabName) {
     if (activeContent) {
         activeContent.style.display = 'flex';
         activeContent.classList.add('active');
+    }
+
+    if (tabName === 'graph' && typeof nodeGraph !== 'undefined' && nodeGraph) {
+        setTimeout(() => {
+            if (nodeGraph._needsLayout) {
+                nodeGraph._relayoutVertical();
+                if (currentConversationId) {
+                    localStorage.setItem('graphLayout-' + currentConversationId, JSON.stringify(nodeGraph.getLayout()));
+                }
+            }
+            nodeGraph.fitToView();
+            nodeGraph._needsLayout = null;
+        }, 100);
     }
 }
 
@@ -4019,7 +4389,8 @@ function setupDetailResize() {
         if (!isResizing) return;
         
         const diff = startX - e.clientX;
-        const newWidth = Math.max(250, Math.min(startWidth + diff, window.innerWidth * 0.6));
+        const containerWidth = document.querySelector('.chat-detail-container').clientWidth;
+        const newWidth = Math.max(250, Math.min(startWidth + diff, containerWidth * 0.6));
         
         detailPanelWidth = newWidth;
         // Update CSS variable on :root for consistent usage
@@ -4058,24 +4429,17 @@ async function requestAnalyzePlan(force = false) {
     const planContent = document.getElementById('planContent');
     const regenerateBtn = document.getElementById('regeneratePlan');
     
-    // DEMO MODE: mock 분석 결과 표시
-    if (DEMO_MODE) {
-        if (planLoading) planLoading.style.display = 'none';
-        if (planContent) {
-            planContent.innerHTML = renderMarkdown(MOCK_PLAN_ANALYSIS);
-        }
-        if (regenerateBtn) regenerateBtn.style.display = 'block';
-        detailPanelData.analysis = MOCK_PLAN_ANALYSIS;
-        return;
-    }
-    
     if (!force && detailPanelData.analysis) {
         // Already have analysis
         return;
     }
     
     // Show loading
-    if (planLoading) planLoading.style.display = 'flex';
+    if (planLoading) {
+        planLoading.style.display = 'flex';
+        const loadingText = planLoading.querySelector('.loading-text');
+        if (loadingText) loadingText.textContent = t('status.analyzing');
+    }
     if (planContent) planContent.innerHTML = '';
     if (regenerateBtn) regenerateBtn.style.display = 'none';
     
@@ -4108,15 +4472,16 @@ async function requestAnalyzePlan(force = false) {
         if (data.success && data.result && data.result.analysis) {
             detailPanelData.analysis = data.result.analysis;
             renderAnalysisPlan(data.result.analysis);
+            saveAnalysisToConversation(data.result.analysis);
         } else {
             if (planContent) {
-                planContent.innerHTML = '<div class="error">분석 생성 실패</div>';
+                planContent.innerHTML = '<div class="error">' + t('error.analysis_failed') + '</div>';
             }
         }
     } catch (error) {
         console.error('analyze_plan error:', error);
         if (planContent) {
-            planContent.innerHTML = `<div class="error">오류: ${escapeHtml(error.message)}</div>`;
+            planContent.innerHTML = '<div class="error">' + t('error.generic', {message: escapeHtml(error.message)}) + '</div>';
         }
     } finally {
         if (planLoading) planLoading.style.display = 'none';
@@ -4131,8 +4496,43 @@ function renderAnalysisPlan(analysis) {
     const planContent = document.getElementById('planContent');
     if (!planContent) return;
     
-    // Use existing markdown renderer
-    planContent.innerHTML = renderMarkdown(analysis);
+    const html = renderMarkdown(analysis);
+    planContent.innerHTML = html;
+
+    if (html === analysis) {
+        console.warn('renderAnalysisPlan: marked may not be loaded, markdown was not converted');
+    }
+
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(planContent, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false },
+                { left: '\\[', right: '\\]', display: true },
+                { left: '\\(', right: '\\)', display: false }
+            ],
+            throwOnError: false
+        });
+    }
+}
+
+/**
+ * Persist analysis text back into the PLAN_COMPLETE message on the server.
+ */
+async function saveAnalysisToConversation(analysisText) {
+    if (!currentConversationId) return;
+    try {
+        await fetch('/api/update_plan_analysis', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversation_id: currentConversationId,
+                analysis: analysisText
+            })
+        });
+    } catch (e) {
+        console.error('Failed to save analysis:', e);
+    }
 }
 
 /**
@@ -4152,7 +4552,7 @@ async function requestCodeGen(stepIndex, force = false) {
     const stepResult = detailPanelData.results[stepIndex];
     if (!stepResult) {
         if (codeContent) {
-            codeContent.innerHTML = '<div class="code-empty-state">이 Step의 결과가 아직 없습니다.</div>';
+            codeContent.innerHTML = '<div class="code-empty-state">' + t('empty.step_no_result') + '</div>';
         }
         return;
     }
@@ -4171,9 +4571,9 @@ async function requestCodeGen(stepIndex, force = false) {
             body: JSON.stringify({
                 tool: 'code_gen',
                 args: {
-                    task: `${toolName} 결과를 시각화하는 Python 코드를 생성하세요. matplotlib과 seaborn을 사용하고, 데이터 테이블도 pandas로 생성하세요.`,
+                    task: `Generate Python code to visualize the results from ${toolName}. Use matplotlib and seaborn for plots, and pandas for data tables.`,
                     language: 'python',
-                    context: JSON.stringify(stepResult.result || stepResult, null, 2)
+                    context: (() => { const raw = JSON.stringify(stepResult.result || stepResult, null, 2); return raw.length > 2000 ? raw.substring(0, 2000) + '\n...(truncated)' : raw; })()
                 }
             })
         });
@@ -4184,54 +4584,19 @@ async function requestCodeGen(stepIndex, force = false) {
             detailPanelData.codes[stepIndex] = data.result;
             renderCode(stepIndex);
         } else {
+            const errMsg = data.error || data.result?.error || 'Code generation failed';
+            console.error('code_gen failed:', errMsg);
             if (codeContent) {
-                codeContent.innerHTML = '<div class="error">코드 생성 실패</div>';
+                codeContent.innerHTML = `<div class="error">Code generation failed: ${escapeHtml(errMsg)}</div>`;
             }
         }
     } catch (error) {
         console.error('code_gen error:', error);
         if (codeContent) {
-            codeContent.innerHTML = `<div class="error">오류: ${escapeHtml(error.message)}</div>`;
+            codeContent.innerHTML = `<div class="error">Error: ${escapeHtml(error.message)}</div>`;
         }
     } finally {
         if (codeLoading) codeLoading.style.display = 'none';
-    }
-}
-
-/**
- * Request summary code generation after plan completion
- */
-async function requestSummaryCodeGen() {
-    if (detailPanelData.results.length === 0) return;
-    
-    try {
-        const allResults = detailPanelData.results.map((r, i) => ({
-            step: i + 1,
-            tool: detailPanelData.steps[i]?.tool || 'unknown',
-            result: r.result || r
-        }));
-        
-        const response = await fetch('/api/tool_call', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                tool: 'code_gen',
-                args: {
-                    task: '모든 연구 단계의 결과를 종합하여 시각화하는 Python 코드를 생성하세요. 전체 결과 요약 그래프, 테이블 등을 포함하세요.',
-                    language: 'python',
-                    context: JSON.stringify(allResults, null, 2)
-                }
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success && data.result) {
-            detailPanelData.summaryCode = data.result;
-            updateCodeStepSelector();
-        }
-    } catch (error) {
-        console.error('Summary code_gen error:', error);
     }
 }
 
@@ -4241,158 +4606,374 @@ async function requestSummaryCodeGen() {
 function updateCodeStepSelector() {
     const selector = document.getElementById('codeStepSelector');
     if (!selector) return;
-    
-    let html = '';
-    
-    // All 버튼 추가 (DEMO MODE)
-    if (DEMO_MODE && Object.keys(detailPanelData.codes).length > 0) {
-        const activeClass = currentCodeStep === 'all' ? ' active' : '';
-        html += `<button class="code-step-btn${activeClass}" data-step="all">All</button>`;
+
+    const hasAnyCode = Object.keys(detailPanelData.codes).length > 0;
+    if (!hasAnyCode) {
+        selector.innerHTML = '';
+        renderCode('all');
+        return;
     }
-    
-    // Step buttons
+
+    if (currentCodeStep === null) currentCodeStep = 'all';
+
+    let html = '';
+    const allActive = currentCodeStep === 'all' ? ' active' : '';
+    html += `<button class="code-step-btn${allActive}" data-step="all">All</button>`;
+
     for (let i = 0; i < detailPanelData.steps.length; i++) {
-        const hasCode = detailPanelData.codes[i];
-        const hasResult = detailPanelData.results[i];
+        if (!detailPanelData.codes[i]) continue;
         const step = detailPanelData.steps[i];
         const activeClass = currentCodeStep === i ? ' active' : '';
-        const disabledAttr = hasResult ? '' : ' disabled';
-        
-        html += `<button class="code-step-btn${activeClass}" data-step="${i}"${disabledAttr}>
+        html += `<button class="code-step-btn${activeClass}" data-step="${i}">
             Step ${i + 1}: ${escapeHtml(step?.tool || '')}
         </button>`;
     }
-    
-    // Summary button
-    if (detailPanelData.summaryCode) {
-        const activeClass = currentCodeStep === 'summary' ? ' active' : '';
-        html += `<button class="code-step-btn${activeClass}" data-step="summary">종합</button>`;
-    }
-    
+
     selector.innerHTML = html;
-    
-    // Add click handlers
+
     selector.querySelectorAll('.code-step-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            const stepVal = btn.dataset.step;
-            if (stepVal === 'all') {
-                currentCodeStep = 'all';
-                updateCodeStepSelector();
-                renderCode('all');
-            } else if (stepVal === 'summary') {
-                currentCodeStep = 'summary';
-                updateCodeStepSelector();
-                renderCode('summary');
-            } else {
-                currentCodeStep = parseInt(stepVal);
-                updateCodeStepSelector();
-                if (DEMO_MODE) {
-                    renderCode(currentCodeStep);
-                } else {
-                    requestCodeGen(currentCodeStep);
-                }
-            }
+            const val = btn.dataset.step;
+            currentCodeStep = val === 'all' ? 'all' : parseInt(val);
+            updateCodeStepSelector();
+            renderCode(currentCodeStep);
         });
     });
+
+    renderCode(currentCodeStep);
 }
 
 /**
  * Render code for a step or summary
  */
-function renderCode(stepIndexOrSummary) {
+function renderCode(stepIndex) {
     const codeContent = document.getElementById('codeContent');
     const codeActions = document.getElementById('codeActions');
     if (!codeContent) return;
-    
-    let codeData;
-    let title;
-    
-    if (stepIndexOrSummary === 'all') {
-        // Step별 구분된 코드 블록 표시
-        let blocksHTML = '';
+
+    if (stepIndex === 'all') {
+        let html = '';
+        let hasAny = false;
         for (let i = 0; i < detailPanelData.steps.length; i++) {
-            if (detailPanelData.codes[i]) {
-                const step = detailPanelData.steps[i];
-                const stepTitle = `Step ${i + 1}: ${step?.tool || ''}`;
-                const highlightedCode = highlightPythonSyntax(detailPanelData.codes[i].code);
-                blocksHTML += `
-                    <div class="code-block" style="margin-bottom: 16px;">
-                        <div class="code-block-header">
-                            <span class="code-block-title">${escapeHtml(stepTitle)}</span>
-                            <span class="code-block-lang">python</span>
-                        </div>
-                        <div class="code-block-body">${highlightedCode}</div>
-                    </div>
-                `;
-            }
+            const cd = detailPanelData.codes[i];
+            if (!cd || !cd.code) continue;
+            hasAny = true;
+            const step = detailPanelData.steps[i];
+            const title = 'Step ' + (i + 1) + ': ' + (step?.tool || '');
+            html += createCodeBlockHTML(cd.code, cd.language, title, i);
         }
-        codeContent.innerHTML = blocksHTML;
-        if (codeActions) codeActions.style.display = 'flex';
+        if (!hasAny) {
+            codeContent.innerHTML = '<div class="code-empty-state">' + t('empty.no_code') + '</div>';
+            if (codeActions) codeActions.style.display = 'none';
+        } else {
+            codeContent.innerHTML = html;
+            attachCodeBlockListeners(codeContent);
+            if (codeActions) codeActions.style.display = 'flex';
+            loadAllSavedResults(codeContent);
+        }
         currentCodeStep = 'all';
         return;
-    } else if (stepIndexOrSummary === 'summary') {
-        codeData = detailPanelData.summaryCode;
-        title = '종합 분석 코드';
-    } else {
-        codeData = detailPanelData.codes[stepIndexOrSummary];
-        const step = detailPanelData.steps[stepIndexOrSummary];
-        title = `Step ${stepIndexOrSummary + 1}: ${step?.tool || ''} 시각화`;
     }
-    
+
+    const codeData = detailPanelData.codes[stepIndex];
+    const step = detailPanelData.steps[stepIndex];
+    const title = 'Step ' + (stepIndex + 1) + ': ' + (step?.tool || '');
+
     if (!codeData || !codeData.code) {
-        codeContent.innerHTML = '<div class="code-empty-state">코드가 없습니다.</div>';
+        codeContent.innerHTML = '<div class="code-empty-state">' + t('empty.no_code') + '</div>';
         if (codeActions) codeActions.style.display = 'none';
         return;
     }
-    
-    // Simple syntax highlighting
-    const highlightedCode = highlightPythonSyntax(codeData.code);
-    
-    codeContent.innerHTML = `
-        <div class="code-block">
-            <div class="code-block-header">
-                <span class="code-block-title">${escapeHtml(title)}</span>
-                <span class="code-block-lang">${codeData.language || 'python'}</span>
-            </div>
-            <div class="code-block-body">${highlightedCode}</div>
-        </div>
-    `;
-    
+
+    codeContent.innerHTML = createCodeBlockHTML(codeData.code, codeData.language, title, stepIndex);
+    attachCodeBlockListeners(codeContent);
     if (codeActions) codeActions.style.display = 'flex';
-    currentCodeStep = stepIndexOrSummary;
+    currentCodeStep = stepIndex;
+    loadAllSavedResults(codeContent);
 }
 
 /**
- * Simple Python syntax highlighting
+ * Syntax highlighting for Python and R code.
  */
-function highlightPythonSyntax(code) {
-    // Escape HTML first
-    let escaped = escapeHtml(code);
-    
-    // Keywords
-    const keywords = ['import', 'from', 'as', 'def', 'class', 'return', 'if', 'else', 'elif', 
-                      'for', 'while', 'in', 'not', 'and', 'or', 'True', 'False', 'None',
-                      'try', 'except', 'finally', 'with', 'lambda', 'yield', 'pass', 'break', 'continue'];
-    
-    // Comments (# ...)
-    escaped = escaped.replace(/(#.*)$/gm, '<span class="code-comment">$1</span>');
-    
-    // Strings (both single and double quotes)
-    escaped = escaped.replace(/(&quot;.*?&quot;|&#39;.*?&#39;|"[^"]*"|'[^']*')/g, '<span class="code-string">$1</span>');
-    
-    // Numbers
-    escaped = escaped.replace(/\b(\d+\.?\d*)\b/g, '<span class="code-number">$1</span>');
-    
-    // Keywords
+function highlightCodeSyntax(code, language) {
+    let s = escapeHtml(code);
+    language = (language || 'python').toLowerCase();
+
+    const pythonKeywords = [
+        'import', 'from', 'as', 'def', 'class', 'return', 'if', 'else', 'elif',
+        'for', 'while', 'in', 'not', 'and', 'or', 'True', 'False', 'None',
+        'try', 'except', 'finally', 'with', 'lambda', 'yield', 'pass', 'break', 'continue'
+    ];
+
+    const rKeywords = [
+        'function', 'library', 'require', 'if', 'else', 'for', 'while', 'repeat',
+        'return', 'next', 'break', 'in', 'TRUE', 'FALSE', 'NULL', 'NA', 'NA_integer_',
+        'NA_real_', 'NA_complex_', 'NA_character_', 'Inf', 'NaN',
+        'source', 'list', 'c', 'data\\.frame', 'matrix'
+    ];
+
+    const keywords = language === 'r' ? rKeywords : pythonKeywords;
+
+    // Placeholder tokens to avoid regex interference between passes
+    const PH = '\x00';
+    const CM_S = PH + 'CS' + PH, CM_E = PH + 'CE' + PH;
+    const ST_S = PH + 'SS' + PH, ST_E = PH + 'SE' + PH;
+    const KW_S = PH + 'KS' + PH, KW_E = PH + 'KE' + PH;
+    const NM_S = PH + 'NS' + PH, NM_E = PH + 'NE' + PH;
+    const FN_S = PH + 'FS' + PH, FN_E = PH + 'FE' + PH;
+
+    s = s.replace(/(#.*)$/gm, CM_S + '$1' + CM_E);
+    s = s.replace(/(&quot;.*?&quot;|&#39;.*?&#39;|"[^"]*"|'[^']*')/g, ST_S + '$1' + ST_E);
+    s = s.replace(/\b(\d+\.?\d*)\b/g, NM_S + '$1' + NM_E);
+
+    if (language === 'r') {
+        s = s.replace(/(&lt;-|-&gt;|&lt;&lt;-)/g, KW_S + '$1' + KW_E);
+        s = s.replace(/(%[^%]+%)/g, KW_S + '$1' + KW_E);
+    }
+
     keywords.forEach(kw => {
         const regex = new RegExp(`\\b(${kw})\\b`, 'g');
-        escaped = escaped.replace(regex, '<span class="code-keyword">$1</span>');
+        s = s.replace(regex, KW_S + '$1' + KW_E);
     });
-    
-    // Function calls
-    escaped = escaped.replace(/\b([a-zA-Z_]\w*)\s*\(/g, '<span class="code-function">$1</span>(');
-    
-    return escaped;
+
+    s = s.replace(/\b([a-zA-Z_][\w.]*)\s*\(/g, FN_S + '$1' + FN_E + '(');
+
+    // Final pass: replace placeholders with actual span tags
+    s = s.replace(/\x00CS\x00/g, '<span class="code-comment">');
+    s = s.replace(/\x00CE\x00/g, '</span>');
+    s = s.replace(/\x00SS\x00/g, '<span class="code-string">');
+    s = s.replace(/\x00SE\x00/g, '</span>');
+    s = s.replace(/\x00KS\x00/g, '<span class="code-keyword">');
+    s = s.replace(/\x00KE\x00/g, '</span>');
+    s = s.replace(/\x00NS\x00/g, '<span class="code-number">');
+    s = s.replace(/\x00NE\x00/g, '</span>');
+    s = s.replace(/\x00FS\x00/g, '<span class="code-function">');
+    s = s.replace(/\x00FE\x00/g, '</span>');
+
+    return s;
+}
+
+/**
+ * Build a code block HTML with header, syntax highlighting, copy/run buttons, and result area.
+ */
+function createCodeBlockHTML(code, language, title, stepIndex) {
+    const highlighted = highlightCodeSyntax(code, language);
+    const id = 'cb-' + Math.random().toString(36).slice(2, 9);
+    const stepAttr = stepIndex != null ? ` data-step="${stepIndex}"` : '';
+    return `
+        <div class="code-block" id="${id}"${stepAttr}>
+            <div class="code-block-header">
+                <span class="code-block-title">${escapeHtml(title || '')}</span>
+                <span class="code-block-lang">${escapeHtml(language || 'python')}</span>
+                <button class="code-run-btn" data-target="${id}">Run</button>
+                <button class="code-copy-btn" data-target="${id}">Copy</button>
+            </div>
+            <div class="code-block-body">${highlighted}</div>
+            <div class="code-result" id="${id}-result" style="display:none">
+                <div class="code-result-stdout"></div>
+                <div class="code-result-figures"></div>
+                <div class="code-result-tables"></div>
+                <div class="code-result-stderr"></div>
+            </div>
+        </div>`;
+}
+
+/**
+ * Copy code from a specific code block via its copy button.
+ */
+function copyCodeBlock(btn) {
+    const targetId = btn.dataset.target;
+    const block = document.getElementById(targetId);
+    if (!block) return;
+    const body = block.querySelector('.code-block-body');
+    if (!body) return;
+    const text = body.textContent || '';
+    navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            btn.textContent = 'Copy';
+            btn.classList.remove('copied');
+        }, 2000);
+    }).catch(err => console.error('Copy failed:', err));
+}
+
+/**
+ * Attach click listeners to all .code-copy-btn elements inside a container.
+ */
+function attachCodeCopyListeners(container) {
+    if (!container) return;
+    container.querySelectorAll('.code-copy-btn').forEach(btn => {
+        btn.addEventListener('click', () => copyCodeBlock(btn));
+    });
+}
+
+function attachCodeBlockListeners(container) {
+    if (!container) return;
+    container.querySelectorAll('.code-copy-btn').forEach(btn => {
+        btn.addEventListener('click', () => copyCodeBlock(btn));
+    });
+    container.querySelectorAll('.code-run-btn').forEach(btn => {
+        btn.addEventListener('click', () => runCodeBlock(btn));
+    });
+}
+
+async function runCodeBlock(btn) {
+    const targetId = btn.dataset.target;
+    const block = document.getElementById(targetId);
+    if (!block) return;
+    const body = block.querySelector('.code-block-body');
+    if (!body) return;
+    const code = body.textContent || '';
+    const lang = block.querySelector('.code-block-lang')?.textContent || 'python';
+    const stepIndex = block.dataset.step != null ? parseInt(block.dataset.step) : 0;
+
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+
+    const resultDiv = block.querySelector('.code-result');
+    if (resultDiv) {
+        resultDiv.style.display = 'block';
+        resultDiv.querySelector('.code-result-stdout').innerHTML = '<div class="code-running">Executing...</div>';
+        resultDiv.querySelector('.code-result-figures').innerHTML = '';
+        resultDiv.querySelector('.code-result-tables').innerHTML = '';
+        resultDiv.querySelector('.code-result-stderr').innerHTML = '';
+    }
+
+    try {
+        const res = await fetch('/api/execute_code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code, language: lang, conv_id: currentConversationId, step_index: stepIndex })
+        });
+        const data = await res.json();
+        if (resultDiv) {
+            displayCodeResult(resultDiv, data);
+        }
+    } catch (e) {
+        if (resultDiv) {
+            resultDiv.querySelector('.code-result-stderr').innerHTML = `<pre class="code-error">${escapeHtml(e.message)}</pre>`;
+        }
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run';
+    }
+}
+
+function displayCodeResult(resultDiv, data) {
+    const stdoutEl = resultDiv.querySelector('.code-result-stdout');
+    const figEl = resultDiv.querySelector('.code-result-figures');
+    const tblEl = resultDiv.querySelector('.code-result-tables');
+    const stderrEl = resultDiv.querySelector('.code-result-stderr');
+
+    stdoutEl.innerHTML = '';
+    figEl.innerHTML = '';
+    tblEl.innerHTML = '';
+    stderrEl.innerHTML = '';
+
+    let hasContent = false;
+
+    if (data.stdout && data.stdout.trim()) {
+        stdoutEl.innerHTML = `<pre class="code-stdout">${escapeHtml(data.stdout)}</pre>`;
+        hasContent = true;
+    }
+    if (data.figures && data.figures.length) {
+        figEl.innerHTML = data.figures.map(f => `<img src="${f}" class="code-result-img">`).join('');
+        hasContent = true;
+    }
+    if (data.tables && data.tables.length) {
+        data.tables.forEach(csvUrl => loadCsvTable(csvUrl, tblEl));
+        hasContent = true;
+    }
+    if (data.stderr && data.stderr.trim()) {
+        stderrEl.innerHTML = `<pre class="code-error">${escapeHtml(data.stderr)}</pre>`;
+        hasContent = true;
+    }
+
+    resultDiv.style.display = hasContent ? 'block' : 'none';
+}
+
+async function loadCsvTable(csvUrl, container) {
+    try {
+        const res = await fetch(csvUrl);
+        const text = await res.text();
+        const rows = text.split('\n').filter(r => r.trim());
+        if (!rows.length) return;
+        const headers = parseCSVRow(rows[0]);
+        let html = '<table class="csv-table"><thead><tr>';
+        headers.forEach(h => { html += `<th>${escapeHtml(h)}</th>`; });
+        html += '</tr></thead><tbody>';
+        for (let i = 1; i < rows.length; i++) {
+            const cols = parseCSVRow(rows[i]);
+            html += '<tr>';
+            cols.forEach(c => { html += `<td>${escapeHtml(c)}</td>`; });
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+        container.insertAdjacentHTML('beforeend', html);
+    } catch (e) {
+        console.warn('Failed to load CSV table:', e);
+    }
+}
+
+function parseCSVRow(row) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < row.length; i++) {
+        const ch = row[i];
+        if (inQuotes) {
+            if (ch === '"' && row[i + 1] === '"') {
+                current += '"';
+                i++;
+            } else if (ch === '"') {
+                inQuotes = false;
+            } else {
+                current += ch;
+            }
+        } else {
+            if (ch === '"') {
+                inQuotes = true;
+            } else if (ch === ',') {
+                result.push(current);
+                current = '';
+            } else {
+                current += ch;
+            }
+        }
+    }
+    result.push(current);
+    return result;
+}
+
+async function loadAllSavedResults(container) {
+    if (!currentConversationId) return;
+    const blocks = container.querySelectorAll('.code-block[data-step]');
+    for (const block of blocks) {
+        const stepIndex = parseInt(block.dataset.step);
+        const resultDiv = block.querySelector('.code-result');
+        if (!resultDiv) continue;
+        try {
+            const res = await fetch(`/api/outputs/${currentConversationId}/step_${stepIndex}`);
+            const data = await res.json();
+            let hasContent = false;
+            if (data.figures && data.figures.length) {
+                const figEl = resultDiv.querySelector('.code-result-figures');
+                figEl.innerHTML = data.figures.map(f => `<img src="${f}" class="code-result-img">`).join('');
+                hasContent = true;
+            }
+            if (data.tables && data.tables.length) {
+                const tblEl = resultDiv.querySelector('.code-result-tables');
+                for (const csvUrl of data.tables) {
+                    await loadCsvTable(csvUrl, tblEl);
+                }
+                hasContent = true;
+            }
+            if (hasContent) resultDiv.style.display = 'block';
+        } catch (e) {
+            // No saved results for this step
+        }
+    }
 }
 
 /**
@@ -4400,18 +4981,26 @@ function highlightPythonSyntax(code) {
  */
 async function copyCurrentCode() {
     const copyBtn = document.getElementById('copyCodeBtn');
-    
-    let codeData;
-    if (currentCodeStep === 'summary') {
-        codeData = detailPanelData.summaryCode;
+
+    let textToCopy = '';
+    if (currentCodeStep === 'all') {
+        const parts = [];
+        for (let i = 0; i < detailPanelData.steps.length; i++) {
+            const cd = detailPanelData.codes[i];
+            if (!cd || !cd.code) continue;
+            const step = detailPanelData.steps[i];
+            parts.push(`# Step ${i + 1}: ${step?.tool || ''}\n${cd.code}`);
+        }
+        textToCopy = parts.join('\n\n');
     } else if (currentCodeStep !== null) {
-        codeData = detailPanelData.codes[currentCodeStep];
+        const codeData = detailPanelData.codes[currentCodeStep];
+        if (codeData) textToCopy = codeData.code;
     }
-    
-    if (!codeData || !codeData.code) return;
+
+    if (!textToCopy) return;
     
     try {
-        await navigator.clipboard.writeText(codeData.code);
+        await navigator.clipboard.writeText(textToCopy);
         
         if (copyBtn) {
             copyBtn.classList.add('copied');
@@ -4440,7 +5029,7 @@ function renderOutputs() {
     if (!outputsContent) return;
     
     if (detailPanelData.results.length === 0) {
-        outputsContent.innerHTML = '<div class="outputs-empty-state">Step 결과가 여기에 표시됩니다.</div>';
+        outputsContent.innerHTML = '<div class="outputs-empty-state">' + t('empty.outputs_hint') + '</div>';
         return;
     }
     
@@ -4472,7 +5061,7 @@ function renderOutputs() {
  * Render detailed tool result for Outputs tab
  */
 function renderToolResultDetail(result) {
-    if (!result) return '<div class="error">결과 없음</div>';
+    if (!result) return '<div class="error">' + t('error.no_result') + '</div>';
     
     let html = '';
     
@@ -4510,7 +5099,7 @@ function renderToolResultDetail(result) {
     
     // Meta info (duration, tokens)
     const meta = [];
-    if (result.duration) meta.push(`${result.duration}초`);
+    if (result.duration) meta.push(`${result.duration}s`);
     if (result.tokens) meta.push(`${result.tokens} tokens`);
     
     if (meta.length > 0) {
@@ -4553,31 +5142,31 @@ function renderOutputTable(headers, data, keys) {
  * Add tool result to Detail Panel and trigger updates
  */
 function addToolResultToDetailPanel(stepIndex, result) {
-    // Store result
-    detailPanelData.results[stepIndex] = result;
+    if (!detailPanelData.results[stepIndex]) {
+        detailPanelData.results[stepIndex] = result;
+    } else {
+        if (!Array.isArray(detailPanelData.results[stepIndex])) {
+            detailPanelData.results[stepIndex] = [detailPanelData.results[stepIndex]];
+        }
+        detailPanelData.results[stepIndex].push(result);
+    }
     detailPanelData.currentStep = stepIndex + 1;
-    
-    // Update Outputs tab
+
+    if (result.result?.code) {
+        detailPanelData.codes[stepIndex] = {
+            language: result.result.language || 'python',
+            code: result.result.code
+        };
+    }
+
     renderOutputs();
-    
-    // Update code step selector
     updateCodeStepSelector();
-    
-    // Trigger code generation for this step
-    requestCodeGen(stepIndex);
-    
-    // Refresh analysis
-    requestAnalyzePlan(true);
 }
 
 /**
  * Handle plan completion
  */
-function onPlanComplete() {
-    // Generate summary code
-    requestSummaryCodeGen();
-    
-    // Final analysis update
+async function onPlanComplete() {
     requestAnalyzePlan(true);
 }
 
@@ -4597,7 +5186,8 @@ function scrollToStepOutput(stepIndex) {
     }, 100);
 }
 
-// Initialize Detail Panel listeners after DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setupDetailPanelListeners());
+} else {
     setupDetailPanelListeners();
-});
+}
