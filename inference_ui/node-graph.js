@@ -41,6 +41,22 @@ class NodeGraph {
         // Selection
         this.selectedConnection = null;
         this.selectedNode = null;
+        this.selectedNodes = new Set();
+
+        // Marquee / clipboard state
+        this.marqueeState = null;
+        this.clipboard = null;
+
+        // Group drag state
+        this._groupDragStart = null;
+
+        // Pending connection undo tracking
+        this._undoPushedForPendingConn = false;
+
+        // Undo/Redo history
+        this._undoStack = [];
+        this._redoStack = [];
+        this._maxHistory = 50;
 
         // Context menu (Create Node)
         this._contextMenu = null;
@@ -109,6 +125,12 @@ class NodeGraph {
                     this._closeCreateMenu();
                 }
             }
+            if (e.button === 0 && this._isBackground(e.target)) {
+                const append = e.ctrlKey || e.metaKey || e.shiftKey;
+                this._startMarquee(e, append);
+                e.preventDefault();
+                return;
+            }
             if (this._isBackground(e.target)) {
                 this._clearSelection();
             }
@@ -125,11 +147,24 @@ class NodeGraph {
                 this._handleResize(e);
                 return;
             }
+            if (this.marqueeState) {
+                this._updateMarquee(e);
+                return;
+            }
             if (this.dragNode) {
                 const rect = this.container.getBoundingClientRect();
                 const x = (e.clientX - rect.left - this.panX) / this.scale - this.dragOffsetX;
                 const y = (e.clientY - rect.top - this.panY) / this.scale - this.dragOffsetY;
-                this._moveNode(this.dragNode, x, y);
+                if (this._groupDragStart && this._groupDragStart.has(this.dragNode)) {
+                    const anchorStart = this._groupDragStart.get(this.dragNode);
+                    const dx = x - anchorStart.x;
+                    const dy = y - anchorStart.y;
+                    for (const [nid, startPos] of this._groupDragStart) {
+                        this._moveNode(nid, startPos.x + dx, startPos.y + dy);
+                    }
+                } else {
+                    this._moveNode(this.dragNode, x, y);
+                }
                 return;
             }
             if (this.pendingConn) {
@@ -159,12 +194,17 @@ class NodeGraph {
             if (this.resizeState) {
                 this.resizeState = null;
                 this.container.style.cursor = '';
-                this.container.dispatchEvent(new CustomEvent('graph-layout-changed'));
+                this._dispatchChange();
+                return;
+            }
+            if (this.marqueeState) {
+                this._finishMarquee();
                 return;
             }
             if (this.dragNode) {
                 this.dragNode = null;
-                this.container.dispatchEvent(new CustomEvent('graph-layout-changed'));
+                this._groupDragStart = null;
+                this._dispatchChange();
             }
             if (this.pendingConn) {
                 this._finishPendingConnection(e);
@@ -172,18 +212,50 @@ class NodeGraph {
         });
 
         window.addEventListener('keydown', e => {
+            const hasModifier = e.ctrlKey || e.metaKey;
+            if (hasModifier && !this._isEditableTarget(e.target)) {
+                const lowerKey = String(e.key || '').toLowerCase();
+                if (lowerKey === 'z' && e.shiftKey) {
+                    this._redo();
+                    e.preventDefault();
+                    return;
+                }
+                if (lowerKey === 'z' && !e.shiftKey) {
+                    this._undo();
+                    e.preventDefault();
+                    return;
+                }
+                if (lowerKey === 'c') {
+                    const copied = this._copySelection();
+                    if (copied) e.preventDefault();
+                    return;
+                }
+                if (lowerKey === 'v') {
+                    const pasted = this._pasteSelection();
+                    if (pasted) e.preventDefault();
+                    return;
+                }
+            }
             if (e.key === 'Escape' && this._contextMenu) {
                 this._closeCreateMenu();
                 return;
             }
             if (e.key === 'Delete' || e.key === 'Backspace') {
                 if (this.selectedConnection) {
+                    this._pushUndoState();
                     this.removeConnection(this.selectedConnection);
                     this.selectedConnection = null;
-                } else if (this.selectedNode) {
-                    this.removeNode(this.selectedNode);
-                    this.selectedNode = null;
+                    this._dispatchChange();
+                    return;
                 }
+                const selectedNodeIds = this._getSelectedNodeIds();
+                if (selectedNodeIds.length === 0) return;
+                this._pushUndoState();
+                for (const nodeId of selectedNodeIds) {
+                    this.removeNode(nodeId);
+                }
+                this._clearSelection();
+                this._dispatchChange();
             }
         });
 
@@ -305,6 +377,8 @@ class NodeGraph {
         const el = this.canvas.querySelector(`[data-node-id="${nodeId}"]`);
         if (el) el.remove();
         this.nodes.delete(nodeId);
+        this.selectedNodes.delete(nodeId);
+        if (this.selectedNode === nodeId) this.selectedNode = null;
     }
 
     _renderNode(node) {
@@ -327,9 +401,12 @@ class NodeGraph {
         el.addEventListener('click', e => {
             if (e.target.closest('.ng-interactive')) return;
             e.stopPropagation();
-            this._clearSelection();
-            this.selectedNode = node.id;
-            el.classList.add('ng-node-selected');
+            const isToggle = e.ctrlKey || e.metaKey;
+            if (isToggle) {
+                this._toggleNodeSelection(node.id);
+                return;
+            }
+            this._selectSingleNode(node.id);
         });
 
         el.querySelectorAll('.ng-interactive').forEach(interactive => {
@@ -344,10 +421,21 @@ class NodeGraph {
             dragHandle.addEventListener('mousedown', e => {
                 if (e.button !== 0) return;
                 e.stopPropagation();
+                this._pushUndoState();
                 const rect = this.container.getBoundingClientRect();
                 this.dragNode = node.id;
                 this.dragOffsetX = (e.clientX - rect.left - this.panX) / this.scale - node.x;
                 this.dragOffsetY = (e.clientY - rect.top - this.panY) / this.scale - node.y;
+
+                if (this.selectedNodes.has(node.id) && this.selectedNodes.size > 1) {
+                    this._groupDragStart = new Map();
+                    for (const nid of this.selectedNodes) {
+                        const n = this.nodes.get(nid);
+                        if (n) this._groupDragStart.set(nid, { x: n.x, y: n.y });
+                    }
+                } else {
+                    this._groupDragStart = null;
+                }
             });
         }
 
@@ -459,6 +547,7 @@ class NodeGraph {
                 if (e.button !== 0) return;
                 e.stopPropagation();
                 e.preventDefault();
+                this._pushUndoState();
                 const rect = this.container.getBoundingClientRect();
                 const gx = (e.clientX - rect.left - this.panX) / this.scale;
                 const gy = (e.clientY - rect.top - this.panY) / this.scale;
@@ -657,6 +746,7 @@ class NodeGraph {
         if (!node) return;
         if (!node.portValues) node.portValues = {};
         node.portValues[portName] = value;
+        this._dispatchChange();
     }
 
     _syncDefaultFieldVisibility(nodeId) {
@@ -703,6 +793,13 @@ class NodeGraph {
                     break;
                 }
             }
+        }
+
+        if (type === 'ref') {
+            const maxAttachments = parseInt(localStorage.getItem('maxAttachments') || '5');
+            const currentRefCount = Array.from(this.connections.values())
+                .filter(c => c.to === toNodeId && c.toPort === toPort && c.type === 'ref').length;
+            if (currentRefCount >= maxAttachments) return null;
         }
 
         const id = `conn-${this.nextConnId++}`;
@@ -760,7 +857,9 @@ class NodeGraph {
         hitPath.addEventListener('contextmenu', e => {
             e.preventDefault();
             e.stopPropagation();
+            this._pushUndoState();
             this.removeConnection(conn.id);
+            this._dispatchChange();
         });
 
         this.svg.appendChild(hitPath);
@@ -801,6 +900,7 @@ class NodeGraph {
     // ---- Pending Connection (drag from port) ----
 
     _startPendingConnection(fromNodeId, portName, portDir, e, connType = 'flow') {
+        this._undoPushedForPendingConn = false;
         let existingConn = null;
         if (connType === 'flow' && portDir === 'in') {
             for (const [connId, conn] of this.connections) {
@@ -818,6 +918,8 @@ class NodeGraph {
 
         let anchorNodeId, anchorPort, anchorDir;
         if (existingConn) {
+            this._pushUndoState();
+            this._undoPushedForPendingConn = true;
             this.removeConnection(existingConn.connId);
             anchorNodeId = existingConn.otherNode;
             anchorPort = existingConn.otherPort;
@@ -852,14 +954,76 @@ class NodeGraph {
         this._highlightCompatiblePorts();
     }
 
+    _findSnapPort(mx, my) {
+        if (!this.pendingConn) return null;
+        const SNAP_RADIUS = 15;
+        const targetDir = this.pendingConn.fromDir === 'out' ? 'in' : 'out';
+        let best = null, bestDist = SNAP_RADIUS;
+
+        for (const [nodeId, node] of this.nodes) {
+            if (nodeId === this.pendingConn.fromNodeId) continue;
+            const el = this.canvas.querySelector(`[data-node-id="${nodeId}"]`);
+            if (!el) continue;
+
+            const ports = this._getPortsForNode(nodeId);
+            for (const p of ports) {
+                if (p.dir !== targetDir) continue;
+
+                let compatible;
+                if (this.pendingConn.connType === 'ref') {
+                    const maxAtt = parseInt(localStorage.getItem('maxAttachments') || '5');
+                    const refCount = Array.from(this.connections.values())
+                        .filter(c => c.to === nodeId && c.toPort === p.name && c.type === 'ref').length;
+                    compatible = refCount < maxAtt;
+                } else if (this.pendingConn.fromDir === 'out') {
+                    compatible = this._isTypeCompatible(this.pendingConn.fromType, p.type);
+                } else {
+                    compatible = this._isTypeCompatible(p.type, this.pendingConn.fromType);
+                }
+                if (!compatible) continue;
+
+                const center = this._getPortCenter(nodeId, p.name);
+                if (!center) continue;
+                const dist = Math.hypot(mx - center.x, my - center.y);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = { nodeId, portName: p.name, center };
+                }
+            }
+        }
+        return best;
+    }
+
     _updatePendingConnection(e) {
         if (!this.pendingConn) return;
         const rect = this.container.getBoundingClientRect();
         const mx = (e.clientX - rect.left - this.panX) / this.scale;
         const my = (e.clientY - rect.top - this.panY) / this.scale;
+
+        const snap = this._findSnapPort(mx, my);
+
+        const prevSnap = this.pendingConn._snapTarget;
+        if (prevSnap) {
+            const prevEl = this.canvas.querySelector(
+                `[data-node-id="${prevSnap.nodeId}"] .ng-port[data-port-name="${prevSnap.portName}"]`);
+            if (prevEl) prevEl.classList.remove('ng-port-snap');
+        }
+
+        let ex = mx, ey = my;
+        if (snap) {
+            ex = snap.center.x;
+            ey = snap.center.y;
+            const snapEl = this.canvas.querySelector(
+                `[data-node-id="${snap.nodeId}"] .ng-port[data-port-name="${snap.portName}"]`);
+            if (snapEl) snapEl.classList.add('ng-port-snap');
+            this.pendingConn._snapTarget = snap;
+        } else {
+            this.pendingConn._snapTarget = null;
+        }
+
         const { startX: x1, startY: y1 } = this.pendingConn;
-        const dy = Math.abs(my - y1) * 0.5;
-        const d = `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${mx} ${my - dy}, ${mx} ${my}`;
+        const dy = Math.abs(ey - y1) * 0.5;
+        const d = `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${ex} ${ey - dy}, ${ex} ${ey}`;
         this.pendingConn.tempLine.setAttribute('d', d);
     }
 
@@ -880,7 +1044,7 @@ class NodeGraph {
             const el = this.canvas.querySelector(`[data-node-id="${nodeId}"]`);
             if (!el) continue;
 
-            const PAD = 30;
+            const PAD = 15;
             if (mx < node.x - PAD || mx > node.x + el.offsetWidth + PAD ||
                 my < node.y - PAD || my > node.y + el.offsetHeight + PAD) continue;
 
@@ -890,7 +1054,10 @@ class NodeGraph {
 
                 let compatible;
                 if (this.pendingConn.connType === 'ref') {
-                    compatible = true;
+                    const maxAtt = parseInt(localStorage.getItem('maxAttachments') || '5');
+                    const refCount = Array.from(this.connections.values())
+                        .filter(c => c.to === nodeId && c.toPort === p.name && c.type === 'ref').length;
+                    compatible = refCount < maxAtt;
                 } else if (this.pendingConn.fromDir === 'out') {
                     compatible = this._isTypeCompatible(this.pendingConn.fromType, p.type);
                 } else {
@@ -909,6 +1076,9 @@ class NodeGraph {
         }
 
         if (bestPort) {
+            if (!this._undoPushedForPendingConn) {
+                this._pushUndoState();
+            }
             const ct = this.pendingConn.connType || 'flow';
             if (this.pendingConn.fromDir === 'out') {
                 this.addConnection(
@@ -921,6 +1091,7 @@ class NodeGraph {
                     this.pendingConn.fromNodeId, this.pendingConn.fromPort, ct
                 );
             }
+            this._dispatchChange();
         }
         this._clearPortHighlights();
         this.pendingConn = null;
@@ -948,7 +1119,11 @@ class NodeGraph {
 
             let compatible;
             if (connType === 'ref') {
-                compatible = true;
+                const maxAtt = parseInt(localStorage.getItem('maxAttachments') || '5');
+                const portName = portEl.dataset.portName;
+                const refCount = Array.from(this.connections.values())
+                    .filter(c => c.to === portNodeId && c.toPort === portName && c.type === 'ref').length;
+                compatible = refCount < maxAtt;
             } else if (fromDir === 'out') {
                 compatible = this._isTypeCompatible(fromType, portType);
             } else {
@@ -964,8 +1139,8 @@ class NodeGraph {
     }
 
     _clearPortHighlights() {
-        this.canvas.querySelectorAll('.ng-port-compatible, .ng-port-dimmed').forEach(el => {
-            el.classList.remove('ng-port-compatible', 'ng-port-dimmed');
+        this.canvas.querySelectorAll('.ng-port-compatible, .ng-port-dimmed, .ng-port-snap').forEach(el => {
+            el.classList.remove('ng-port-compatible', 'ng-port-dimmed', 'ng-port-snap');
         });
     }
 
@@ -978,11 +1153,252 @@ class NodeGraph {
             });
             this.selectedConnection = null;
         }
-        if (this.selectedNode) {
-            const el = this.canvas.querySelector(`[data-node-id="${this.selectedNode}"]`);
+        for (const nodeId of this.selectedNodes) {
+            const el = this.canvas.querySelector(`[data-node-id="${nodeId}"]`);
             if (el) el.classList.remove('ng-node-selected');
+        }
+        this.selectedNodes.clear();
+        this.selectedNode = null;
+    }
+
+    _setNodeSelected(nodeId, selected) {
+        const el = this.canvas.querySelector(`[data-node-id="${nodeId}"]`);
+        if (!el) return;
+        el.classList.toggle('ng-node-selected', selected);
+        if (selected) this.selectedNodes.add(nodeId);
+        else this.selectedNodes.delete(nodeId);
+        this.selectedNode = this.selectedNodes.size === 1 ? Array.from(this.selectedNodes)[0] : null;
+    }
+
+    _selectSingleNode(nodeId) {
+        this._clearSelection();
+        this._setNodeSelected(nodeId, true);
+    }
+
+    _toggleNodeSelection(nodeId) {
+        const alreadySelected = this.selectedNodes.has(nodeId);
+        this._setNodeSelected(nodeId, !alreadySelected);
+    }
+
+    _getSelectedNodeIds() {
+        if (this.selectedNodes.size > 0) return Array.from(this.selectedNodes);
+        if (this.selectedNode) return [this.selectedNode];
+        return [];
+    }
+
+    _isEditableTarget(target) {
+        if (!target || !(target instanceof Element)) return false;
+        if (target.closest('.ng-create-menu')) return true;
+        const editable = target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
+        return Boolean(editable);
+    }
+
+    _startMarquee(e, append = false) {
+        const rect = this.container.getBoundingClientRect();
+        const startX = e.clientX - rect.left;
+        const startY = e.clientY - rect.top;
+
+        if (!append) this._clearSelection();
+
+        const box = document.createElement('div');
+        box.className = 'ng-marquee';
+        box.style.left = startX + 'px';
+        box.style.top = startY + 'px';
+        box.style.width = '0px';
+        box.style.height = '0px';
+        this.container.appendChild(box);
+
+        this.marqueeState = {
+            startX,
+            startY,
+            currentX: startX,
+            currentY: startY,
+            append,
+            box
+        };
+    }
+
+    _updateMarquee(e) {
+        if (!this.marqueeState) return;
+        const rect = this.container.getBoundingClientRect();
+        this.marqueeState.currentX = e.clientX - rect.left;
+        this.marqueeState.currentY = e.clientY - rect.top;
+
+        const minX = Math.min(this.marqueeState.startX, this.marqueeState.currentX);
+        const minY = Math.min(this.marqueeState.startY, this.marqueeState.currentY);
+        const width = Math.abs(this.marqueeState.currentX - this.marqueeState.startX);
+        const height = Math.abs(this.marqueeState.currentY - this.marqueeState.startY);
+
+        this.marqueeState.box.style.left = minX + 'px';
+        this.marqueeState.box.style.top = minY + 'px';
+        this.marqueeState.box.style.width = width + 'px';
+        this.marqueeState.box.style.height = height + 'px';
+    }
+
+    _finishMarquee() {
+        if (!this.marqueeState) return;
+
+        const { startX, startY, currentX, currentY, append, box } = this.marqueeState;
+        if (box) box.remove();
+
+        const minPX = Math.min(startX, currentX);
+        const minPY = Math.min(startY, currentY);
+        const maxPX = Math.max(startX, currentX);
+        const maxPY = Math.max(startY, currentY);
+
+        const minGX = (minPX - this.panX) / this.scale;
+        const minGY = (minPY - this.panY) / this.scale;
+        const maxGX = (maxPX - this.panX) / this.scale;
+        const maxGY = (maxPY - this.panY) / this.scale;
+
+        if (!append) {
+            for (const nodeId of this.selectedNodes) {
+                const el = this.canvas.querySelector(`[data-node-id="${nodeId}"]`);
+                if (el) el.classList.remove('ng-node-selected');
+            }
+            this.selectedNodes.clear();
             this.selectedNode = null;
         }
+
+        for (const [nodeId, node] of this.nodes) {
+            const el = this.canvas.querySelector(`[data-node-id="${nodeId}"]`);
+            if (!el) continue;
+            const w = el.offsetWidth || node.width || 180;
+            const h = el.offsetHeight || node.height || 60;
+
+            const intersects = node.x < maxGX && node.x + w > minGX && node.y < maxGY && node.y + h > minGY;
+            if (intersects) {
+                this._setNodeSelected(nodeId, true);
+            }
+        }
+
+        this.marqueeState = null;
+    }
+
+    _getViewportCenterGraphPos() {
+        const cx = this.container.clientWidth / 2;
+        const cy = this.container.clientHeight / 2;
+        return {
+            x: (cx - this.panX) / this.scale,
+            y: (cy - this.panY) / this.scale
+        };
+    }
+
+    _copySelection() {
+        const selectedNodeIds = this._getSelectedNodeIds();
+        if (selectedNodeIds.length === 0) return false;
+        const idSet = new Set(selectedNodeIds);
+
+        const nodes = [];
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+
+        for (const nodeId of selectedNodeIds) {
+            const node = this.nodes.get(nodeId);
+            if (!node) continue;
+            const el = this.canvas.querySelector(`[data-node-id="${nodeId}"]`);
+            const w = el ? el.offsetWidth : (node.width || 180);
+            const h = el ? el.offsetHeight : (node.height || 60);
+
+            nodes.push({
+                id: node.id,
+                type: node.type,
+                title: node.title,
+                tool: node.tool,
+                description: node.description,
+                x: node.x,
+                y: node.y,
+                width: node.width,
+                height: node.height,
+                status: node.status,
+                stepNum: node.stepNum,
+                resultText: node.resultText,
+                portValues: { ...(node.portValues || {}) }
+            });
+
+            minX = Math.min(minX, node.x);
+            minY = Math.min(minY, node.y);
+            maxX = Math.max(maxX, node.x + w);
+            maxY = Math.max(maxY, node.y + h);
+        }
+
+        if (nodes.length === 0) return false;
+
+        const connections = [];
+        for (const conn of this.connections.values()) {
+            if (!idSet.has(conn.from) || !idSet.has(conn.to)) continue;
+            connections.push({
+                from: conn.from,
+                fromPort: conn.fromPort,
+                to: conn.to,
+                toPort: conn.toPort,
+                type: conn.type || 'flow'
+            });
+        }
+
+        this.clipboard = {
+            nodes,
+            connections,
+            centerX: (minX + maxX) / 2,
+            centerY: (minY + maxY) / 2
+        };
+        return true;
+    }
+
+    _pasteSelection() {
+        if (!this.clipboard || !Array.isArray(this.clipboard.nodes) || this.clipboard.nodes.length === 0) {
+            return false;
+        }
+
+        this._pushUndoState();
+        const center = this._getViewportCenterGraphPos();
+        const deltaX = center.x - this.clipboard.centerX;
+        const deltaY = center.y - this.clipboard.centerY;
+        const oldToNew = new Map();
+        const newIds = [];
+
+        this._clearSelection();
+
+        for (const srcNode of this.clipboard.nodes) {
+            const nodeConfig = {
+                type: srcNode.type,
+                title: srcNode.title,
+                tool: srcNode.tool,
+                description: srcNode.description,
+                x: srcNode.x + deltaX,
+                y: srcNode.y + deltaY,
+                width: srcNode.width,
+                height: srcNode.height,
+                status: srcNode.status || 'pending',
+                stepNum: srcNode.stepNum,
+                resultText: srcNode.resultText || '',
+                portValues: { ...(srcNode.portValues || {}) }
+            };
+            const newId = this.addNode(nodeConfig);
+            oldToNew.set(srcNode.id, newId);
+            newIds.push(newId);
+        }
+
+        for (const srcConn of this.clipboard.connections || []) {
+            const fromId = oldToNew.get(srcConn.from);
+            const toId = oldToNew.get(srcConn.to);
+            if (!fromId || !toId) continue;
+            this.addConnection(
+                fromId,
+                srcConn.fromPort || 'out',
+                toId,
+                srcConn.toPort || 'in',
+                srcConn.type || 'flow'
+            );
+        }
+
+        for (const nodeId of newIds) {
+            this._setNodeSelected(nodeId, true);
+        }
+        this._dispatchChange();
+        return true;
     }
 
     // ---- Create from Plan ----
@@ -1048,6 +1464,13 @@ class NodeGraph {
         this.panX = 0;
         this.panY = 0;
         this.scale = 1;
+        this.selectedNode = null;
+        this.selectedConnection = null;
+        this.selectedNodes.clear();
+        this.marqueeState = null;
+        this._groupDragStart = null;
+        this._undoStack = [];
+        this._redoStack = [];
         this._needsLayout = null;
         this._applyTransform();
     }
@@ -1327,9 +1750,11 @@ class NodeGraph {
     // ---- Background Check ----
 
     _isBackground(target) {
-        return target === this.container ||
-               target === this.svg ||
-               target === this.canvas;
+        if (target === this.container || target === this.svg || target === this.canvas) return true;
+        if (!this.container.contains(target)) return false;
+        if (target.closest('.ng-node, .ng-zoom-controls, .ng-create-menu, .graph-popout-btn')) return false;
+        if (target instanceof SVGElement && target !== this.svg) return false;
+        return true;
     }
 
     // ---- Create Node Menu ----
@@ -1462,9 +1887,11 @@ class NodeGraph {
     }
 
     _onNodeTypeSelected(type) {
+        this._pushUndoState();
         const { x, y } = this._contextMenuGraphPos;
         this.addNode({ type, x, y });
         this._closeCreateMenu();
+        this._dispatchChange();
     }
 
     // ---- Inline Title Editing ----
@@ -1504,14 +1931,130 @@ class NodeGraph {
 
     _commitTitleEdit(nodeId, titleEl, input) {
         if (!titleEl.contains(input)) return;
+        this._pushUndoState();
         const newTitle = input.value.trim() || 'Step';
         const node = this.nodes.get(nodeId);
         if (node) node.title = newTitle;
         titleEl.textContent = newTitle;
+        this._dispatchChange();
     }
 
     _cancelTitleEdit(nodeId, titleEl, originalTitle) {
         titleEl.textContent = originalTitle;
+    }
+
+    // ---- Undo / Redo ----
+
+    _getSnapshot() {
+        const nodes = [];
+        for (const node of this.nodes.values()) {
+            nodes.push({
+                id: node.id,
+                type: node.type,
+                title: node.title,
+                tool: node.tool,
+                description: node.description,
+                x: node.x,
+                y: node.y,
+                width: node.width,
+                height: node.height,
+                status: node.status,
+                stepNum: node.stepNum,
+                resultText: node.resultText,
+                portValues: JSON.parse(JSON.stringify(node.portValues || {}))
+            });
+        }
+        const connections = [];
+        for (const conn of this.connections.values()) {
+            connections.push({
+                id: conn.id,
+                from: conn.from,
+                fromPort: conn.fromPort,
+                to: conn.to,
+                toPort: conn.toPort,
+                type: conn.type
+            });
+        }
+        return { nodes, connections, nextNodeId: this.nextNodeId, nextConnId: this.nextConnId };
+    }
+
+    _restoreSnapshot(snapshot) {
+        if (!snapshot) return;
+        this.nodes.clear();
+        this.connections.clear();
+        if (this.canvas) this.canvas.innerHTML = '';
+        if (this.svg) this.svg.innerHTML = '';
+        this.selectedNode = null;
+        this.selectedConnection = null;
+        this.selectedNodes.clear();
+
+        this.nextNodeId = snapshot.nextNodeId || 1;
+        this.nextConnId = snapshot.nextConnId || 1;
+
+        for (const n of snapshot.nodes) {
+            const node = {
+                id: n.id,
+                type: n.type,
+                title: n.title,
+                tool: n.tool || '',
+                description: n.description || '',
+                x: n.x,
+                y: n.y,
+                width: n.width,
+                height: n.height,
+                status: n.status || 'pending',
+                stepNum: n.stepNum || '',
+                resultText: n.resultText || '',
+                portValues: JSON.parse(JSON.stringify(n.portValues || {}))
+            };
+            this.nodes.set(node.id, node);
+            this._renderNode(node);
+        }
+        for (const c of snapshot.connections) {
+            const conn = {
+                id: c.id,
+                from: c.from,
+                fromPort: c.fromPort,
+                to: c.to,
+                toPort: c.toPort,
+                type: c.type || 'flow'
+            };
+            this.connections.set(conn.id, conn);
+            this._renderConnection(conn);
+            if (conn.type === 'flow') {
+                this._hideDefaultField(conn.to, conn.toPort);
+            }
+        }
+        this._applyTransform();
+        this.refreshConnections();
+    }
+
+    _pushUndoState() {
+        this._undoStack.push(this._getSnapshot());
+        this._redoStack = [];
+        if (this._undoStack.length > this._maxHistory) {
+            this._undoStack.shift();
+        }
+    }
+
+    _undo() {
+        if (this._undoStack.length === 0) return;
+        this._redoStack.push(this._getSnapshot());
+        const snapshot = this._undoStack.pop();
+        this._restoreSnapshot(snapshot);
+        this._dispatchChange();
+    }
+
+    _redo() {
+        if (this._redoStack.length === 0) return;
+        this._undoStack.push(this._getSnapshot());
+        const snapshot = this._redoStack.pop();
+        this._restoreSnapshot(snapshot);
+        this._dispatchChange();
+    }
+
+    _dispatchChange() {
+        this.container.dispatchEvent(new CustomEvent('graph-layout-changed'));
     }
 
     // ---- Utilities ----

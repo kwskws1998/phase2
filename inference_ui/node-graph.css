@@ -56,14 +56,15 @@
 
 .ng-node-selected {
     border-color: var(--primary-color, #3b82f6);
-    outline: 1px solid rgba(59, 130, 246, 0.15);
+    outline: 2px solid rgba(59, 130, 246, 0.5);
     outline-offset: 3px;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15), 0 0 12px rgba(59, 130, 246, 0.1);
 }
 
 .ng-node-selected:hover {
     border-color: var(--primary-color, #3b82f6);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2), 0 0 12px rgba(59, 130, 246, 0.1);
-    outline: 1px solid rgba(59, 130, 246, 0.15);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25), 0 0 16px rgba(59, 130, 246, 0.15);
+    outline: 2px solid rgba(59, 130, 246, 0.5);
     outline-offset: 3px;
 }
 
@@ -601,7 +602,8 @@ textarea.ng-input-node-field {
 
 .ng-conn-ref {
     stroke-dasharray: 8 4;
-    opacity: 0.6;
+    opacity: 0.85;
+    stroke-width: 2.5;
 }
 
 .ng-conn-ref:hover {
@@ -834,7 +836,15 @@ textarea.ng-input-node-field {
 }
 
 [data-theme="cyber-edge"] .ng-conn-ref {
-    stroke: rgba(144, 145, 140, 0.25);
+    stroke: rgba(144, 145, 140, 0.55);
+}
+
+.ng-marquee {
+    position: absolute;
+    border: 1px dashed var(--primary-color, #3b82f6);
+    background: rgba(59, 130, 246, 0.12);
+    pointer-events: none;
+    z-index: 9;
 }
 
 [data-theme="cyber-edge"] .ng-conn-ref:hover {

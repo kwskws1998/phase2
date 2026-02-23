@@ -109,7 +109,7 @@ async function initializeApp() {
         nodeGraph = new NodeGraph(graphContainer);
         graphContainer.addEventListener('graph-layout-changed', () => {
             if (currentConversationId && nodeGraph) {
-                localStorage.setItem('graphLayout-' + currentConversationId, JSON.stringify(nodeGraph.getLayout()));
+                localStorage.setItem('graphState-' + currentConversationId, JSON.stringify(nodeGraph.getState()));
             }
         });
     }
@@ -313,18 +313,18 @@ function setupFileUpload() {
     });
 }
 
-function getMaxImages() {
-    return parseInt(localStorage.getItem('maxImages') || '5');
+function getMaxAttachments() {
+    return parseInt(localStorage.getItem('maxAttachments') || '5');
 }
 
 async function handleFiles(files) {
-    const maxImages = getMaxImages();
+    const maxAttachments = getMaxAttachments();
     
     for (const file of files) {
         if (file.type.startsWith('image/')) {
-            const currentImageCount = pendingFiles.filter(f => f.type === 'image').length;
-            if (currentImageCount >= maxImages) {
-                alert(`Maximum ${maxImages} images allowed. You can change this in Settings.`);
+            const currentCount = pendingFiles.filter(f => f.type === 'image' || f.type === 'document').length;
+            if (currentCount >= maxAttachments) {
+                alert(`Maximum ${maxAttachments} attachments allowed. You can change this in Settings.`);
                 return;
             }
         }
@@ -345,8 +345,8 @@ async function handleFiles(files) {
             const result = await resp.json();
 
             if (file.type.startsWith('image/')) {
-                const currentImageCount = pendingFiles.filter(f => f.type === 'image').length;
-                if (currentImageCount < maxImages) {
+                const currentCount = pendingFiles.filter(f => f.type === 'image' || f.type === 'document').length;
+                if (currentCount < maxAttachments) {
                     pendingFiles.push({
                         type: 'image', name: result.fileName,
                         uploadId: result.uploadId,
@@ -359,13 +359,16 @@ async function handleFiles(files) {
                     uploadId: result.uploadId, data: dataUrl
                 });
             } else {
-                pendingFiles.push({
-                    type: 'document', name: result.fileName,
-                    uploadId: result.uploadId,
-                    textContent: result.textContent,
-                    fileSize: result.fileSize,
-                    extractionMethod: result.extractionMethod
-                });
+                const currentCount = pendingFiles.filter(f => f.type === 'image' || f.type === 'document').length;
+                if (currentCount < maxAttachments) {
+                    pendingFiles.push({
+                        type: 'document', name: result.fileName,
+                        uploadId: result.uploadId,
+                        textContent: result.textContent,
+                        fileSize: result.fileSize,
+                        extractionMethod: result.extractionMethod
+                    });
+                }
             }
             renderFilePreviews();
         } catch (err) {
@@ -2309,10 +2312,9 @@ document.getElementById('settingsBtn').addEventListener('click', async () => {
         document.getElementById('settingMaxLength').value = data.max_length || 32768;
         document.getElementById('settingTopK').value = data.top_k || 50;
         
-        // Update Max Images slider value
-        const maxImages = getMaxImages();
-        document.getElementById('settingMaxImages').value = maxImages;
-        document.getElementById('maxImagesValue').textContent = maxImages;
+        const maxAttachments = getMaxAttachments();
+        document.getElementById('settingMaxAttachments').value = maxAttachments;
+        document.getElementById('maxAttachmentsValue').textContent = maxAttachments;
         
         // Update Max Context value
         const maxContext = data.max_context || 32768;
@@ -2375,10 +2377,9 @@ document.getElementById('settingOpacity').addEventListener('input', (e) => {
     setBgOpacity(value);
 });
 
-// Max Images slider event
-document.getElementById('settingMaxImages').addEventListener('input', (e) => {
+document.getElementById('settingMaxAttachments').addEventListener('input', (e) => {
     const value = e.target.value;
-    document.getElementById('maxImagesValue').textContent = value;
+    document.getElementById('maxAttachmentsValue').textContent = value;
 });
 
 // Max Context input event (warn if exceeds 256k)
@@ -2398,7 +2399,7 @@ async function saveSettings() {
     const temperature = parseFloat(document.getElementById('settingTemperature').value);
     const maxLength = parseInt(document.getElementById('settingMaxLength').value);
     const topK = parseInt(document.getElementById('settingTopK').value);
-    const maxImages = parseInt(document.getElementById('settingMaxImages').value);
+    const maxAttachments = parseInt(document.getElementById('settingMaxAttachments').value);
     let maxContext = parseInt(document.getElementById('settingMaxContext').value);
     
     // Cap max_context at 256k
@@ -2410,7 +2411,7 @@ async function saveSettings() {
     }
     
     setUserDisplayName(userName);
-    localStorage.setItem('maxImages', maxImages.toString());
+    localStorage.setItem('maxAttachments', maxAttachments.toString());
     
     // Apply language change
     const selectedLang = document.getElementById('settingLanguage').value;
@@ -3821,22 +3822,13 @@ function openDetailPanel(planData) {
     // Create graph from plan data
     if (nodeGraph) {
         nodeGraph.createFromPlan(planData);
-        if (currentConversationId) {
-            const savedLayout = localStorage.getItem('graphLayout-' + currentConversationId);
-            if (savedLayout) {
-                try {
-                    const layout = JSON.parse(savedLayout);
-                    nodeGraph.applyLayout(layout, { skipPosition: true });
-                } catch (e) {}
-            }
-        }
         const graphTabVisible = document.getElementById('tabGraph')?.style.display !== 'none';
         if (graphTabVisible) {
             setTimeout(() => {
                 nodeGraph._relayoutVertical();
                 nodeGraph.fitToView();
                 if (currentConversationId) {
-                    localStorage.setItem('graphLayout-' + currentConversationId, JSON.stringify(nodeGraph.getLayout()));
+                    localStorage.setItem('graphState-' + currentConversationId, JSON.stringify(nodeGraph.getState()));
                 }
                 nodeGraph._needsLayout = null;
             }, 100);
@@ -4024,10 +4016,35 @@ function openDetailPanelFromSaved(planData) {
     const nodeGraphContainer = document.getElementById('nodeGraphContainer');
     if (nodeGraphContainer) nodeGraphContainer.style.display = '';
     
-    // Create graph from plan data
+    // Restore graph: prefer saved full state, fall back to createFromPlan
     if (nodeGraph) {
-        nodeGraph.createFromPlan(planData);
-        // Set node statuses from results
+        let restoredFromState = false;
+        if (currentConversationId) {
+            const savedState = localStorage.getItem('graphState-' + currentConversationId);
+            if (savedState) {
+                try {
+                    nodeGraph.setState(JSON.parse(savedState));
+                    restoredFromState = true;
+                } catch (e) {}
+            }
+        }
+        if (!restoredFromState) {
+            nodeGraph.createFromPlan(planData);
+            const graphTabVisible = document.getElementById('tabGraph')?.style.display !== 'none';
+            if (graphTabVisible) {
+                setTimeout(() => {
+                    nodeGraph._relayoutVertical();
+                    nodeGraph.fitToView();
+                    if (currentConversationId) {
+                        localStorage.setItem('graphState-' + currentConversationId, JSON.stringify(nodeGraph.getState()));
+                    }
+                    nodeGraph._needsLayout = null;
+                }, 100);
+            } else {
+                nodeGraph._needsLayout = 'full';
+            }
+        }
+        // Apply step statuses from results (may have updated since last save)
         results.forEach(r => {
             if (r.step) {
                 const nodeId = `step-${r.step}`;
@@ -4035,7 +4052,6 @@ function openDetailPanelFromSaved(planData) {
                 nodeGraph.setNodeStatus(nodeId, status);
             }
         });
-        // Set remaining steps to "stopped" if plan was stopped
         if (planData.stopped) {
             (planData.steps || []).forEach((step, index) => {
                 const stepNum = index + 1;
@@ -4044,28 +4060,6 @@ function openDetailPanelFromSaved(planData) {
                     nodeGraph.setNodeStatus(`step-${stepNum}`, 'stopped');
                 }
             });
-        }
-        if (currentConversationId) {
-            const savedLayout = localStorage.getItem('graphLayout-' + currentConversationId);
-            if (savedLayout) {
-                try {
-                    const layout = JSON.parse(savedLayout);
-                    nodeGraph.applyLayout(layout, { skipPosition: true });
-                } catch (e) {}
-            }
-        }
-        const graphTabVisible = document.getElementById('tabGraph')?.style.display !== 'none';
-        if (graphTabVisible) {
-            setTimeout(() => {
-                nodeGraph._relayoutVertical();
-                nodeGraph.fitToView();
-                if (currentConversationId) {
-                    localStorage.setItem('graphLayout-' + currentConversationId, JSON.stringify(nodeGraph.getLayout()));
-                }
-                nodeGraph._needsLayout = null;
-            }, 100);
-        } else {
-            nodeGraph._needsLayout = 'full';
         }
         broadcastGraphMessage({ type: 'plan-data', payload: planData });
     }
@@ -4355,7 +4349,7 @@ function switchDetailTab(tabName) {
             if (nodeGraph._needsLayout) {
                 nodeGraph._relayoutVertical();
                 if (currentConversationId) {
-                    localStorage.setItem('graphLayout-' + currentConversationId, JSON.stringify(nodeGraph.getLayout()));
+                    localStorage.setItem('graphState-' + currentConversationId, JSON.stringify(nodeGraph.getState()));
                 }
             }
             nodeGraph.fitToView();
