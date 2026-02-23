@@ -1,9 +1,9 @@
 // ============================================
-// Matrix 4x4 Node Type (Input category)
+// Matrix 2x2 Node Type (Input category)
 // ============================================
 
-NodeRegistry.register('matrix4', {
-    label: 'Matrix 4x4',
+NodeRegistry.register('matrix2', {
+    label: 'Matrix 2x2',
     category: 'Input',
     dataOnly: true,
 
@@ -12,19 +12,19 @@ NodeRegistry.register('matrix4', {
     ],
 
     defaultConfig: {
-        title: 'Matrix 4x4',
+        title: 'Matrix 2x2',
         status: 'completed',
-        portValues: { out: [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1] }
+        portValues: { out: [1,0, 0,1] }
     },
 
     render(node, helpers) {
         const el = document.createElement('div');
-        const identity = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+        const identity = [1,0, 0,1];
         const vals = (node.portValues && Array.isArray(node.portValues.out))
             ? node.portValues.out : identity;
 
         const cells = [];
-        for (let i = 0; i < 16; i++) {
+        for (let i = 0; i < 4; i++) {
             const v = vals[i] !== undefined ? vals[i] : identity[i];
             cells.push(`<input class="ng-matrix-cell ng-interactive" type="number" step="any" value="${v}" data-cell="${i}">`);
         }
@@ -34,7 +34,7 @@ NodeRegistry.register('matrix4', {
                 <span class="ng-node-title">${helpers.escapeHtml(node.title)}</span>
             </div>
             <div class="ng-matrix-body">
-                <div class="ng-matrix-grid ng-matrix-4x4">
+                <div class="ng-matrix-grid ng-matrix-2x2">
                     ${cells.join('\n')}
                 </div>
             </div>

@@ -7,8 +7,8 @@ NodeRegistry.register('math_sqrt', {
     category: 'Math',
 
     ports: [
-        { name: 'value', dir: 'in', type: 'float', label: 'Value', defaultValue: 4 },
-        { name: 'out', dir: 'out', type: 'float', label: 'Result' }
+        { name: 'value', dir: 'in', type: 'numeric', label: 'Value', defaultValue: 4 },
+        { name: 'out', dir: 'out', type: 'numeric', label: 'Result' }
     ],
 
     defaultConfig: {
@@ -19,8 +19,8 @@ NodeRegistry.register('math_sqrt', {
 
     render(node, helpers) {
         return MathNodeHelper.render(node, helpers, [
-            { name: 'value', label: 'Value', type: 'float', defaultValue: 4 }
-        ]);
+            { name: 'value', label: 'Value', type: 'numeric', defaultValue: 4 }
+        ], 'numeric');
     },
 
     getDragHandle(el) {

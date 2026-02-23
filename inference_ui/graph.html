@@ -51,6 +51,12 @@
         const container = document.getElementById('nodeGraphContainer');
         graph = new NodeGraph(container);
 
+        container.addEventListener('graph-layout-changed', () => {
+            if (channel && graph) {
+                channel.postMessage({ type: 'graph-modified', payload: graph.getState() });
+            }
+        });
+
         if (typeof BroadcastChannel !== 'undefined') {
             channel = new BroadcastChannel('node-graph');
             channel.onmessage = (e) => {

@@ -8,7 +8,7 @@ NodeRegistry.register('matrix3', {
     dataOnly: true,
 
     ports: [
-        { name: 'out', dir: 'out', type: 'data', label: 'Matrix' }
+        { name: 'out', dir: 'out', type: 'matrix', label: 'Matrix' }
     ],
 
     defaultConfig: {
@@ -39,7 +39,7 @@ NodeRegistry.register('matrix3', {
                 </div>
             </div>
             <div class="ng-ports-out-row" data-node-id="${node.id}">
-                <div class="ng-port ng-port-out" data-port-name="out" data-port-dir="out" data-port-type="data" data-node-id="${node.id}"></div>
+                <div class="ng-port ng-port-out" data-port-name="out" data-port-dir="out" data-port-type="matrix" data-node-id="${node.id}"></div>
             </div>
         `;
 

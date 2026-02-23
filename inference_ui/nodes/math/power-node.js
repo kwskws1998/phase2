@@ -7,9 +7,9 @@ NodeRegistry.register('math_power', {
     category: 'Math',
 
     ports: [
-        { name: 'base', dir: 'in', type: 'float', label: 'Base', defaultValue: 2 },
-        { name: 'exp', dir: 'in', type: 'float', label: 'Exp', defaultValue: 2 },
-        { name: 'out', dir: 'out', type: 'float', label: 'Result' }
+        { name: 'base', dir: 'in', type: 'numeric', label: 'Base', defaultValue: 2 },
+        { name: 'exp', dir: 'in', type: 'numeric', label: 'Exp', defaultValue: 2 },
+        { name: 'out', dir: 'out', type: 'numeric', label: 'Result' }
     ],
 
     defaultConfig: {
@@ -20,9 +20,9 @@ NodeRegistry.register('math_power', {
 
     render(node, helpers) {
         return MathNodeHelper.render(node, helpers, [
-            { name: 'base', label: 'Base', type: 'float', defaultValue: 2 },
-            { name: 'exp', label: 'Exp', type: 'float', defaultValue: 2 }
-        ]);
+            { name: 'base', label: 'Base', type: 'numeric', defaultValue: 2 },
+            { name: 'exp', label: 'Exp', type: 'numeric', defaultValue: 2 }
+        ], 'numeric');
     },
 
     getDragHandle(el) {

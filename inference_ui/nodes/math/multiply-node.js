@@ -7,9 +7,9 @@ NodeRegistry.register('math_multiply', {
     category: 'Math',
 
     ports: [
-        { name: 'a', dir: 'in', type: 'float', label: 'A', defaultValue: 1 },
-        { name: 'b', dir: 'in', type: 'float', label: 'B', defaultValue: 1 },
-        { name: 'out', dir: 'out', type: 'float', label: 'Result' }
+        { name: 'a', dir: 'in', type: 'numeric', label: 'A', defaultValue: 1 },
+        { name: 'b', dir: 'in', type: 'numeric', label: 'B', defaultValue: 1 },
+        { name: 'out', dir: 'out', type: 'numeric', label: 'Result' }
     ],
 
     defaultConfig: {
@@ -20,9 +20,9 @@ NodeRegistry.register('math_multiply', {
 
     render(node, helpers) {
         return MathNodeHelper.render(node, helpers, [
-            { name: 'a', label: 'A', type: 'float', defaultValue: 1 },
-            { name: 'b', label: 'B', type: 'float', defaultValue: 1 }
-        ]);
+            { name: 'a', label: 'A', type: 'numeric', defaultValue: 1 },
+            { name: 'b', label: 'B', type: 'numeric', defaultValue: 1 }
+        ], 'numeric');
     },
 
     getDragHandle(el) {

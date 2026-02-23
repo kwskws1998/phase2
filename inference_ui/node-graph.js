@@ -84,10 +84,7 @@ class NodeGraph {
     }
 
     _isTypeCompatible(outType, inType) {
-        if (inType === 'any' || outType === 'any') return true;
-        if (inType === 'string') return true;
-        if (inType === 'float' && outType === 'int') return true;
-        return outType === inType;
+        return PortTypes.isCompatible(outType, inType);
     }
 
     // ---- Event Setup ----

@@ -8,7 +8,7 @@ NodeRegistry.register('composite', {
     category: 'General',
 
     ports: [
-        { name: 'image', dir: 'in', type: 'data', label: 'Image' },
+        { name: 'image', dir: 'in', type: 'image', label: 'Image' },
         { name: 'prompt', dir: 'in', type: 'string', label: 'Prompt' },
         { name: 'out', dir: 'out', type: 'any', label: 'Result' }
     ],
@@ -25,7 +25,7 @@ NodeRegistry.register('composite', {
 
         el.innerHTML = `
             <div class="ng-ports-in-row" data-node-id="${node.id}">
-                <div class="ng-port ng-port-in" data-port-name="image" data-port-dir="in" data-port-type="data" data-node-id="${node.id}"></div>
+                <div class="ng-port ng-port-in" data-port-name="image" data-port-dir="in" data-port-type="image" data-node-id="${node.id}"></div>
                 <div class="ng-port ng-port-in" data-port-name="prompt" data-port-dir="in" data-port-type="string" data-node-id="${node.id}"></div>
             </div>
             <div class="ng-node-header">

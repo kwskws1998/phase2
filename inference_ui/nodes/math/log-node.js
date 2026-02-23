@@ -7,9 +7,9 @@ NodeRegistry.register('math_log', {
     category: 'Math',
 
     ports: [
-        { name: 'value', dir: 'in', type: 'float', label: 'Value', defaultValue: 1 },
-        { name: 'base', dir: 'in', type: 'float', label: 'Base', defaultValue: 2.718 },
-        { name: 'out', dir: 'out', type: 'float', label: 'Result' }
+        { name: 'value', dir: 'in', type: 'numeric', label: 'Value', defaultValue: 1 },
+        { name: 'base', dir: 'in', type: 'numeric', label: 'Base', defaultValue: 2.718 },
+        { name: 'out', dir: 'out', type: 'numeric', label: 'Result' }
     ],
 
     defaultConfig: {
@@ -20,9 +20,9 @@ NodeRegistry.register('math_log', {
 
     render(node, helpers) {
         return MathNodeHelper.render(node, helpers, [
-            { name: 'value', label: 'Value', type: 'float', defaultValue: 1 },
-            { name: 'base', label: 'Base', type: 'float', defaultValue: 2.718 }
-        ]);
+            { name: 'value', label: 'Value', type: 'numeric', defaultValue: 1 },
+            { name: 'base', label: 'Base', type: 'numeric', defaultValue: 2.718 }
+        ], 'numeric');
     },
 
     getDragHandle(el) {

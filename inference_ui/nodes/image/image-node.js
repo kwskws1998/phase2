@@ -16,7 +16,7 @@ NodeRegistry.register('image', {
     dataOnly: true,
 
     ports: [
-        { name: 'out', dir: 'out', type: 'data', label: 'Image' }
+        { name: 'out', dir: 'out', type: 'image', label: 'Image' }
     ],
 
     defaultConfig: {
@@ -58,7 +58,7 @@ NodeRegistry.register('image', {
                 <input type="file" class="ng-data-file-input" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg" hidden>
             </div>
             <div class="ng-ports-out-row" data-node-id="${node.id}">
-                <div class="ng-port ng-port-out" data-port-name="out" data-port-dir="out" data-port-type="data" data-node-id="${node.id}"></div>
+                <div class="ng-port ng-port-out" data-port-name="out" data-port-dir="out" data-port-type="image" data-node-id="${node.id}"></div>
             </div>
         `;
 

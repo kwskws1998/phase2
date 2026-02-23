@@ -4104,7 +4104,12 @@ function setupGraphChannel() {
                 onGraphPopoutClosed();
                 break;
             case 'graph-modified':
-                if (nodeGraph) nodeGraph.setState(payload);
+                if (nodeGraph) {
+                    nodeGraph.setState(payload);
+                    if (currentConversationId) {
+                        localStorage.setItem('graphState-' + currentConversationId, JSON.stringify(payload));
+                    }
+                }
                 break;
             case 'rerun-plan':
                 rerunPlanFromGraph();
@@ -4154,6 +4159,12 @@ function onGraphPopoutClosed() {
     const container = document.getElementById('nodeGraphContainer');
     if (notice) notice.style.display = 'none';
     if (container) container.style.display = '';
+
+    if (nodeGraph) {
+        requestAnimationFrame(() => {
+            nodeGraph.refreshConnections();
+        });
+    }
 }
 
 async function rerunPlanFromGraph() {

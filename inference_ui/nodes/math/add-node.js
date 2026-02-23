@@ -7,9 +7,9 @@ NodeRegistry.register('math_add', {
     category: 'Math',
 
     ports: [
-        { name: 'a', dir: 'in', type: 'float', label: 'A', defaultValue: 0 },
-        { name: 'b', dir: 'in', type: 'float', label: 'B', defaultValue: 0 },
-        { name: 'out', dir: 'out', type: 'float', label: 'Result' }
+        { name: 'a', dir: 'in', type: 'addable', label: 'A', defaultValue: 0 },
+        { name: 'b', dir: 'in', type: 'addable', label: 'B', defaultValue: 0 },
+        { name: 'out', dir: 'out', type: 'numeric', label: 'Result' }
     ],
 
     defaultConfig: {
@@ -20,9 +20,9 @@ NodeRegistry.register('math_add', {
 
     render(node, helpers) {
         return MathNodeHelper.render(node, helpers, [
-            { name: 'a', label: 'A', type: 'float', defaultValue: 0 },
-            { name: 'b', label: 'B', type: 'float', defaultValue: 0 }
-        ]);
+            { name: 'a', label: 'A', type: 'addable', defaultValue: 0 },
+            { name: 'b', label: 'B', type: 'addable', defaultValue: 0 }
+        ], 'numeric');
     },
 
     getDragHandle(el) {
