@@ -5,6 +5,7 @@
 NodeRegistry.register('step', {
     label: 'Step',
     category: 'General',
+    allowRef: true,
 
     ports: [
         { name: 'in', dir: 'in', type: 'any' },

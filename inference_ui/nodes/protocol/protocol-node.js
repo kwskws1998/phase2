@@ -5,6 +5,7 @@
 NodeRegistry.register('protocol', {
     label: 'Protocol Builder',
     category: 'Tool',
+    allowRef: true,
 
     ports: [
         { name: 'in', dir: 'in', type: 'any' },

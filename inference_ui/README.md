@@ -66,6 +66,7 @@ Each node is composed of the following parts:
 
 - `dataOnly` -- The node is a pure data supplier and is not included in the execution plan. It only provides values to other nodes via connections.
 - `sideEffect` -- The node produces a visible side effect (display, save) rather than just passing data through.
+- `allowRef` -- The node can receive reference connections. Only LLM-using nodes (Step, Composite, and all Tool nodes) have this flag. Nodes without it will reject reference connections and their ports will be dimmed during a ref drag.
 
 #### General Nodes
 
@@ -176,7 +177,7 @@ Drag from an output port to an input port to create a connection.
 
 **Reference Connections** are a secondary connection type used to attach supplementary data to a node without being part of the main execution chain. For example, a Step node might reference a Data Loader node to access a dataset during its execution, even though the Data Loader is not the previous step in the pipeline. Reference connections are shown as dashed lines to visually distinguish them from the primary flow.
 
-To create a reference connection, right-click drag from a port instead of left-click dragging. Unlike flow connections, reference connections bypass port type restrictions -- any port can be referenced regardless of type. This makes it possible to attach an Image node to a Step node via reference even though a direct flow connection is not allowed.
+To create a reference connection, right-click drag from a port instead of left-click dragging. Unlike flow connections, reference connections bypass port type restrictions. However, only nodes with `allowRef: true` can receive reference connections -- these are the LLM-using nodes: Step, Composite, and all Tool nodes (Analyze, CodeGen, PubMed, NCBI Gene, CRISPR, Protocol). Input, Data, Math, and sideEffect nodes do not accept reference connections and their ports will be dimmed during a ref drag. This makes it possible to attach an Image node to a Step node via reference even though a direct flow connection is not allowed.
 
 <img src="img/reference-connection.png" alt="Reference connection example" width="480">
 
@@ -191,7 +192,7 @@ During a flow connection drag, compatible ports are highlighted and incompatible
 - `string` inputs accept any output type
 - `float` inputs also accept `int` outputs
 - `boolean`, `data` are standalone types (not in any group)
-- Reference connections bypass all type restrictions
+- Reference connections bypass type restrictions but only on `allowRef: true` nodes (Step, Composite, Tool nodes)
 
 <img src="img/port-compatibility.png" alt="Port compatibility highlighting" width="680">
 

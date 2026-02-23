@@ -5,6 +5,7 @@
 NodeRegistry.register('ncbi_gene', {
     label: 'NCBI Gene',
     category: 'Tool',
+    allowRef: true,
 
     ports: [
         { name: 'in', dir: 'in', type: 'any' },

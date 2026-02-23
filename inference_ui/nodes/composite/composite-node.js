@@ -6,6 +6,7 @@
 NodeRegistry.register('composite', {
     label: 'Composite',
     category: 'General',
+    allowRef: true,
 
     ports: [
         { name: 'image', dir: 'in', type: 'image', label: 'Image' },

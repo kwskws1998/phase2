@@ -87,6 +87,13 @@ class NodeGraph {
         return PortTypes.isCompatible(outType, inType);
     }
 
+    _allowsRef(nodeId) {
+        const node = this.nodes.get(nodeId);
+        if (!node) return false;
+        const def = NodeRegistry.get(node.type);
+        return def?.allowRef === true;
+    }
+
     // ---- Event Setup ----
 
     _setupEvents() {
@@ -793,6 +800,7 @@ class NodeGraph {
         }
 
         if (type === 'ref') {
+            if (!this._allowsRef(toNodeId)) return null;
             const maxAttachments = parseInt(localStorage.getItem('maxAttachments') || '5');
             const currentRefCount = Array.from(this.connections.values())
                 .filter(c => c.to === toNodeId && c.toPort === toPort && c.type === 'ref').length;
@@ -968,6 +976,7 @@ class NodeGraph {
 
                 let compatible;
                 if (this.pendingConn.connType === 'ref') {
+                    if (!this._allowsRef(nodeId)) continue;
                     const maxAtt = parseInt(localStorage.getItem('maxAttachments') || '5');
                     const refCount = Array.from(this.connections.values())
                         .filter(c => c.to === nodeId && c.toPort === p.name && c.type === 'ref').length;
@@ -1051,6 +1060,7 @@ class NodeGraph {
 
                 let compatible;
                 if (this.pendingConn.connType === 'ref') {
+                    if (!this._allowsRef(nodeId)) continue;
                     const maxAtt = parseInt(localStorage.getItem('maxAttachments') || '5');
                     const refCount = Array.from(this.connections.values())
                         .filter(c => c.to === nodeId && c.toPort === p.name && c.type === 'ref').length;
@@ -1116,6 +1126,10 @@ class NodeGraph {
 
             let compatible;
             if (connType === 'ref') {
+                if (!this._allowsRef(portNodeId)) {
+                    portEl.classList.add('ng-port-dimmed');
+                    return;
+                }
                 const maxAtt = parseInt(localStorage.getItem('maxAttachments') || '5');
                 const portName = portEl.dataset.portName;
                 const refCount = Array.from(this.connections.values())

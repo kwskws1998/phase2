@@ -5,6 +5,7 @@
 NodeRegistry.register('pubmed', {
     label: 'PubMed Search',
     category: 'Tool',
+    allowRef: true,
 
     ports: [
         { name: 'in', dir: 'in', type: 'any' },

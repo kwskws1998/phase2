@@ -5,6 +5,7 @@
 NodeRegistry.register('analyze', {
     label: 'Analyze Plan',
     category: 'Tool',
+    allowRef: true,
 
     ports: [
         { name: 'in', dir: 'in', type: 'any' },

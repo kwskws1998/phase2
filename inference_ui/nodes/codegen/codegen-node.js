@@ -5,6 +5,7 @@
 NodeRegistry.register('codegen', {
     label: 'Code Gen',
     category: 'Tool',
+    allowRef: true,
 
     ports: [
         { name: 'in', dir: 'in', type: 'any' },

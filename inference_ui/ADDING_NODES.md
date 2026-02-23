@@ -128,6 +128,7 @@ Node files are discovered automatically via the `/api/node-manifest` endpoint. R
 | `updateResult(el, resultText)` | function | No | Update result text display |
 | `dataOnly` | boolean | No | Marks a data-only node |
 | `sideEffect` | boolean | No | Marks a node with side effects |
+| `allowRef` | boolean | No | Allows the node to receive reference connections. Only LLM-using nodes (General: Step/Composite, all Tool nodes) should set this to `true`. Nodes without `allowRef: true` will have their ports dimmed and will reject ref connections. |
 
 ### Port Definition
 
@@ -179,7 +180,7 @@ A group-typed output (e.g. `numeric`) is compatible with another group input if 
 - `float` input ports also accept `int` outputs (promotion)
 - Otherwise, types must match exactly
 
-**Reference connections** bypass all type restrictions. Any port can be referenced regardless of type, subject only to the max attachments limit.
+**Reference connections** bypass port type restrictions, but are only accepted by nodes with `allowRef: true` (Step, Composite, and all Tool nodes). Nodes without this property (Input, Data, Math, sideEffect nodes) will reject reference connections. Allowed nodes are additionally subject to the max attachments limit.
 
 ### Registering Custom Port Types
 
@@ -243,7 +244,7 @@ Node connections come in two types:
 | `flow` | Left-click drag from a port | Solid line | Execution order / data flow |
 | `ref` | Right-click drag from a port | Dashed line | Reference attachment |
 
-Flow connections enforce port type compatibility (see above). Reference connections bypass all type restrictions, allowing any output to reference any input. For example, an Image node (`image` output) cannot flow-connect to a Step node (`any` input), but it can be attached as a reference.
+Flow connections enforce port type compatibility (see above). Reference connections bypass port type restrictions but are only accepted by nodes with `allowRef: true` (Step, Composite, and all Tool nodes). For example, an Image node (`image` output) cannot flow-connect to a Step node (`any` input), but it can be attached as a reference because Step has `allowRef: true`. Math and Input nodes do not accept reference connections.
 
 ---
 

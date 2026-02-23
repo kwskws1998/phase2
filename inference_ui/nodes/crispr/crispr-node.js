@@ -5,6 +5,7 @@
 NodeRegistry.register('crispr', {
     label: 'CRISPR Designer',
     category: 'Tool',
+    allowRef: true,
 
     ports: [
         { name: 'in', dir: 'in', type: 'any' },
