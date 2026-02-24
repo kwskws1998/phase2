@@ -273,23 +273,6 @@ The graph state (node positions, connections, pan/zoom) is automatically saved t
 | `index.html` | Main page (contains graph container) |
 | `graph.html` | Standalone graph page for pop-out windows |
 
-## Required Images
-
-Please prepare the following images in the `inference_ui/img/` folder:
-
-| Filename | Content |
-|----------|---------|
-| `graph-overview.png` | Full screenshot of the graph with several nodes connected together |
-| `create-menu.png` | Screenshot showing the Create Node menu open |
-| `node-anatomy.png` | Zoomed-in view of a single node with labels on each part (header, ports, body, status bar) |
-| `connection-drag.png` | Screenshot of a connection being dragged from one port to another |
-| `port-compatibility.png` | Screenshot showing compatible ports highlighted and incompatible ports dimmed during a drag |
-| `multi-select.png` | Screenshot of multiple nodes selected via marquee drag (showing blue border highlights) |
-| `reference-connection.png` | Screenshot showing a dashed reference connection between two nodes alongside a solid flow connection, so both types are visible for comparison |
-| `nodes-general.png` | All General category nodes side by side: Step, Composite, Visualize, Observe, Save, Table |
-| `nodes-input.png` | All Input category nodes side by side: String, Integer, Float, Double, Boolean, Vector2, Vector3, Vector4, Color, Matrix2, Matrix3, Matrix4 |
-| `nodes-math.png` | All 7 Math category nodes side by side: Add, Subtract, Multiply, Divide, Power, Sqrt, Log, showing the inline default value inputs |
-
 ## Adding Custom Nodes
 
 To add new node types, see [ADDING_NODES.md](ADDING_NODES.md).
