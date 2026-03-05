@@ -209,8 +209,11 @@ def main():
 
     # 3. Install/Upgrade Pip & Dependencies
     if has_uv:
-        print("Installing project in editable mode using uv...")
-        if os.path.exists("pyproject.toml"):
+        if os.path.exists("pyproject.toml") and os.path.exists("uv.lock"):
+            print("Installing from lockfile using uv sync...")
+            run_command(f'uv sync --python "{venv_dir}"')
+        elif os.path.exists("pyproject.toml"):
+            print("Installing project in editable mode using uv...")
             run_command(f'uv pip install -e . --python "{venv_dir}"')
         elif os.path.exists("requirements.txt"):
             run_command(f'uv pip install -r requirements.txt --python "{venv_dir}"')
