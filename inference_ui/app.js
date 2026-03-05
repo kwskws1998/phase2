@@ -16,7 +16,8 @@ let currentStepQuestion = null;  // Step question context { stepNum, tool, stepN
 
 // Detail Panel State
 let detailPanelOpen = true;
-let detailPanelWidth = 600;  // Default width
+let detailPanelWidth = 400;  // Default width
+let detailPanelManuallyResized = false;
 let detailPanelData = {
     goal: '',
     steps: [],
@@ -26,9 +27,15 @@ let detailPanelData = {
     currentStep: 0
 };
 let currentCodeStep = null;  // Currently selected Step in Code tab
+let activePlanMsgIndex = -1; // Message index of the plan currently shown in the detail panel
 let currentMode = 'agent';   // 'agent' or 'plan'
 let graphPopoutWindow = null; // Reference to popped-out graph window
 let nodeGraph = null;         // NodeGraph instance
+
+function _graphStateKey() {
+    return 'graphState-' + currentConversationId + '-' + activePlanMsgIndex;
+}
+
 // DOM Elements
 const sidebar = document.getElementById('sidebar');
 const sidebarToggle = document.getElementById('sidebarToggle');
@@ -49,7 +56,6 @@ const scrollToBottomBtn = document.getElementById('scrollToBottomBtn');
 // Detail Panel DOM Elements
 const detailPanel = document.getElementById('detailPanel');
 const detailToggle = document.getElementById('detailToggle');
-const detailClose = document.getElementById('detailClose');
 const detailResizeHandle = document.getElementById('detailResizeHandle');
 const chatArea = document.getElementById('chatArea');
 
@@ -100,8 +106,28 @@ async function initializeApp() {
     }
     applyModeToggle();
     
-    // Detail panel always visible - set initial width
-    document.documentElement.style.setProperty('--detail-panel-width', detailPanelWidth + 'px');
+    // Detail panel always visible - set initial width (6:4 ratio)
+    // Defer to next frame so the container has its final layout dimensions
+    requestAnimationFrame(() => {
+        const chatDetailContainer = document.querySelector('.chat-detail-container');
+        if (chatDetailContainer) {
+            detailPanelWidth = Math.max(300, chatDetailContainer.clientWidth * 0.4);
+        }
+        document.documentElement.style.setProperty('--detail-panel-width', detailPanelWidth + 'px');
+    });
+
+    // Keep 6:4 ratio when window/container resizes (unless user manually dragged)
+    const chatDetailObserver = new ResizeObserver(() => {
+        if (!detailPanelManuallyResized && detailPanelOpen) {
+            const container = document.querySelector('.chat-detail-container');
+            if (container && container.clientWidth > 0) {
+                detailPanelWidth = Math.max(300, container.clientWidth * 0.4);
+                document.documentElement.style.setProperty('--detail-panel-width', detailPanelWidth + 'px');
+            }
+        }
+    });
+    const chatContainer = document.querySelector('.chat-detail-container');
+    if (chatContainer) chatDetailObserver.observe(chatContainer);
     
     // Initialize node graph
     const graphContainer = document.getElementById('nodeGraphContainer');
@@ -109,8 +135,12 @@ async function initializeApp() {
         nodeGraph = new NodeGraph(graphContainer);
         graphContainer.addEventListener('graph-layout-changed', () => {
             if (currentConversationId && nodeGraph) {
-                localStorage.setItem('graphState-' + currentConversationId, JSON.stringify(nodeGraph.getState()));
+                localStorage.setItem(_graphStateKey(), JSON.stringify(nodeGraph.getState()));
             }
+        });
+        graphContainer.addEventListener('node-detail-popup', (e) => {
+            const { nodeId, node } = e.detail;
+            openNodeDetailWidget(nodeId, node, graphContainer);
         });
     }
     
@@ -133,6 +163,71 @@ async function initializeApp() {
 }
 
 function setupEventListeners() {
+    // Model dropdown (entire model-selector area is clickable)
+    const modelSelector = document.getElementById('modelSelector');
+    if (modelSelector) {
+        modelSelector.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleModelDropdown();
+        });
+    }
+    
+    // Settings nav tabs
+    const settingsTabMap = {
+        'general': 'settingsGeneral',
+        'appearance': 'settingsAppearance',
+        'api-keys': 'settingsApiKeys'
+    };
+    document.querySelectorAll('.settings-nav-item').forEach(navItem => {
+        navItem.addEventListener('click', () => {
+            const tab = navItem.dataset.tab;
+            document.querySelectorAll('.settings-nav-item').forEach(n => n.classList.remove('active'));
+            navItem.classList.add('active');
+            document.querySelectorAll('.settings-tab-content').forEach(tc => tc.classList.remove('active'));
+            const targetId = settingsTabMap[tab];
+            if (targetId) {
+                const targetContent = document.getElementById(targetId);
+                if (targetContent) targetContent.classList.add('active');
+            }
+        });
+    });
+    
+    // API key show/hide toggles
+    const eyeOpen = '<svg class="eye-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const eyeClosed = '<svg class="eye-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
+    document.querySelectorAll('.api-key-toggle').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.target;
+            const input = document.getElementById(targetId);
+            if (input) {
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    btn.innerHTML = eyeOpen;
+                    btn.title = t('label.hide_key');
+                } else {
+                    input.type = 'password';
+                    btn.innerHTML = eyeClosed;
+                    btn.title = t('label.show_key');
+                }
+            }
+        });
+    });
+    
+    // Plan box click-to-switch
+    if (messagesWrapper) {
+        messagesWrapper.addEventListener('click', (e) => {
+            const planBox = e.target.closest('.plan-steps-box');
+            if (!planBox) return;
+            if (e.target.closest('button') || e.target.closest('.step-action-btn')) return;
+
+            const messageEl = planBox.closest('.message');
+            const msgIdx = parseInt(messageEl?.getAttribute('data-index'), 10);
+            if (isNaN(msgIdx) || msgIdx === activePlanMsgIndex) return;
+
+            switchToPlan(msgIdx);
+        });
+    }
+
     // Sidebar toggle
     sidebarToggle.addEventListener('click', () => toggleSidebar());
     
@@ -209,8 +304,8 @@ function setupEventListeners() {
         scrollToBottomBtn.classList.remove('input-hover');
     });
     
-    // Mode toggle
-    document.querySelectorAll('.mode-btn').forEach(btn => {
+    // Mode toggle (Agent / Plan)
+    document.querySelectorAll('#modeToggle .mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             currentMode = btn.dataset.mode;
             localStorage.setItem('inferenceMode', currentMode);
@@ -324,7 +419,7 @@ async function handleFiles(files) {
         if (file.type.startsWith('image/')) {
             const currentCount = pendingFiles.filter(f => f.type === 'image' || f.type === 'document').length;
             if (currentCount >= maxAttachments) {
-                alert(`Maximum ${maxAttachments} attachments allowed. You can change this in Settings.`);
+                alert(t('error.max_attachments', { count: maxAttachments }));
                 return;
             }
         }
@@ -373,7 +468,7 @@ async function handleFiles(files) {
             renderFilePreviews();
         } catch (err) {
             console.error('File upload failed:', err);
-            alert(`Failed to upload ${file.name}`);
+            alert(t('error.upload_failed', { name: file.name }));
         }
     }
 }
@@ -393,7 +488,7 @@ function renderFilePreviews() {
                 ? `<span class="file-icon doc-icon"></span><span class="file-name">${escapeHtml(f.name)}</span>`
                 : `<span class="file-icon audio-icon"></span><span class="file-name">${escapeHtml(f.name)}</span>`
             }
-            <button class="file-remove" onclick="removeFile(${i})" title="Remove">\u00d7</button>
+            <button class="file-remove" onclick="removeFile(${i})" title="${t('tooltip.remove')}">\u00d7</button>
         </div>
     `).join('');
 }
@@ -453,7 +548,7 @@ function renderConversationsList() {
         conversationsList.innerHTML = `
             <div class="empty-state">
                 <div class="empty-state-icon">💬</div>
-                <p>No conversations yet</p>
+                <p>${t('empty.no_conversations')}</p>
             </div>
         `;
         return;
@@ -465,10 +560,10 @@ function renderConversationsList() {
              onclick="loadConversation('${conv.id}')">
             <div class="conversation-icon">💬</div>
             <div class="conversation-info">
-                <div class="conversation-title">${escapeHtml(conv.title || 'New Chat')}</div>
+                <div class="conversation-title">${escapeHtml(conv.title || t('label.new_chat'))}</div>
                 <div class="conversation-date">${formatDate(conv.updated_at || conv.created_at)}</div>
             </div>
-            <button class="conversation-delete" onclick="deleteConversation(event, '${conv.id}')" title="Delete">
+            <button class="conversation-delete" onclick="deleteConversation(event, '${conv.id}')" title="${t('tooltip.delete')}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14"/>
                 </svg>
@@ -536,7 +631,7 @@ async function createNewChat() {
 async function deleteConversation(event, id) {
     event.stopPropagation();
     
-    if (!confirm('Delete this conversation?')) return;
+    if (!confirm(t('confirm.delete_conversation'))) return;
     
     try {
         const response = await fetch(`/api/conversation/${id}`, { method: 'DELETE' });
@@ -556,7 +651,7 @@ async function deleteConversation(event, id) {
 
 async function clearCurrentChat() {
     if (!currentConversationId) return;
-    if (!confirm('Clear all messages in this conversation?')) return;
+    if (!confirm(t('confirm.clear_messages'))) return;
     
     // Hide detail panel when clearing chat
     hideDetailPanel();
@@ -588,7 +683,14 @@ function renderMessages(messages) {
     }
     
     welcomeMessage.style.display = 'none';
-    messagesWrapper.innerHTML = messages.map((msg, index) => createMessageHTML(msg, index)).join('');
+    messagesWrapper.innerHTML = messages.map((msg, index) => {
+        try {
+            return createMessageHTML(msg, index);
+        } catch (e) {
+            console.error(`[renderMessages] Error rendering message ${index}:`, e);
+            return `<div class="message"><div class="message-content"><div class="error">Failed to render message</div></div></div>`;
+        }
+    }).join('');
     
     // Render math
     renderMath();
@@ -601,7 +703,7 @@ function createMessageHTML(message, index = -1) {
     const isUser = message.role === 'user';
     const userDisplayName = getUserDisplayName();
     const avatar = isUser ? userDisplayName.charAt(0).toUpperCase() : 'A';
-    const roleName = isUser ? userDisplayName : 'Assistant';
+    const roleName = isUser ? userDisplayName : t('label.assistant');
     
     let contentHTML = '';
     
@@ -677,19 +779,19 @@ function createMessageHTML(message, index = -1) {
         if (isUser) {
             actionsHTML = `
                 <div class="message-actions">
-                    <button class="message-action-btn" onclick="editMessage(${index})" title="Edit and resend">
+                    <button class="message-action-btn" onclick="editMessage(${index})" title="${t('tooltip.edit_resend')}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                         </svg>
                     </button>
-                    <button class="message-action-btn" onclick="copyMessage(${index})" title="Copy">
+                    <button class="message-action-btn" onclick="copyMessage(${index})" title="${t('tooltip.copy_msg')}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                         </svg>
                     </button>
-                    <button class="message-action-btn delete-btn" onclick="deleteFromMessage(${index})" title="Delete from here">
+                    <button class="message-action-btn delete-btn" onclick="deleteFromMessage(${index})" title="${t('tooltip.delete_from')}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                         </svg>
@@ -699,19 +801,19 @@ function createMessageHTML(message, index = -1) {
         } else {
             actionsHTML = `
                 <div class="message-actions">
-                    <button class="message-action-btn" onclick="regenerateFrom(${index})" title="Regenerate">
+                    <button class="message-action-btn" onclick="regenerateFrom(${index})" title="${t('label.regenerate')}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M23 4v6h-6M1 20v-6h6"/>
                             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                         </svg>
                     </button>
-                    <button class="message-action-btn" onclick="copyMessage(${index})" title="Copy">
+                    <button class="message-action-btn" onclick="copyMessage(${index})" title="${t('tooltip.copy_msg')}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                         </svg>
                     </button>
-                    <button class="message-action-btn delete-btn" onclick="deleteFromMessage(${index})" title="Delete from here">
+                    <button class="message-action-btn delete-btn" onclick="deleteFromMessage(${index})" title="${t('tooltip.delete_from')}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                         </svg>
@@ -974,7 +1076,7 @@ function createToolsHTML(content) {
         <div class="special-token-container tools-container">
             <button class="special-toggle" onclick="toggleSpecialToken(this)">
                 <span class="special-icon">🔧</span>
-                <span class="special-label">Available Tools</span>
+                <span class="special-label">${t('label.available_tools')}</span>
                 <span class="special-arrow">▶</span>
             </button>
             <div class="special-content"><pre>${escapeHtml(content)}</pre></div>
@@ -1089,7 +1191,8 @@ function createCompletedPlanHTML(planData) {
                 thought: r.thought,
                 action: r.action,
                 error: r.error,
-                result: r.result
+                result: r.result,
+                step: stepNum
             }));
             const formattedResult = parts.join('<hr class="tool-result-divider">');
             resultHTML = `<div class="step-result" style="display: block;">${formattedResult}</div>`;
@@ -1133,7 +1236,13 @@ function createCompletedPlanHTML(planData) {
         `;
     });
     
-    return `<div class="plan-steps-box completed-plan">${goalHTML}<div class="plan-steps">${stepsHTML}</div></div>`;
+    const analysisRow = planData.analysis
+        ? `<div class="plan-analyzing-row plan-analyzing-done"><span class="analyzing-check">✓</span><span>${t('status.analysis_complete') || 'Analysis Complete'}</span></div>`
+        : planData.stopped
+            ? `<div class="plan-analyzing-row plan-analyzing-stopped"><span class="analyzing-icon">◼</span><span>Analysis</span></div>`
+            : `<div class="plan-analyzing-row"><span class="analyzing-icon">◎</span><span>Analysis</span></div>`;
+
+    return `<div class="plan-steps-box completed-plan">${goalHTML}<div class="plan-steps">${stepsHTML}</div>${analysisRow}</div>`;
 }
 
 function createToolCallsHTML(content) {
@@ -1153,7 +1262,7 @@ function createToolCallsHTML(content) {
         <div class="special-token-container tool-calls-container">
             <div class="special-badge tool-calls-badge">
                 <span class="special-icon">⚡</span>
-                <span class="special-label">Tool Call</span>
+                <span class="special-label">${t('label.tool_call')}</span>
             </div>
             <div class="special-content"><pre>${escapeHtml(displayContent)}</pre></div>
         </div>
@@ -1165,7 +1274,7 @@ function createToolResultsHTML(content) {
         <div class="special-token-container tool-results-container">
             <button class="special-toggle" onclick="toggleSpecialToken(this)">
                 <span class="special-icon">📋</span>
-                <span class="special-label">Tool Results</span>
+                <span class="special-label">${t('label.tool_results')}</span>
                 <span class="special-arrow">▶</span>
             </button>
             <div class="special-content"><pre>${escapeHtml(content)}</pre></div>
@@ -1178,7 +1287,7 @@ function createToolContentHTML(content) {
         <div class="special-token-container tool-content-container">
             <div class="special-badge">
                 <span class="special-icon">📦</span>
-                <span class="special-label">Tool Content</span>
+                <span class="special-label">${t('label.tool_content')}</span>
             </div>
             <div class="special-content"><pre>${escapeHtml(content)}</pre></div>
         </div>
@@ -1190,21 +1299,21 @@ function createFimHTML(fim) {
     
     if (fim.prefix) {
         html += `<div class="fim-section fim-prefix">
-            <span class="fim-label">PREFIX</span>
+            <span class="fim-label">${t('label.prefix')}</span>
             <pre>${escapeHtml(fim.prefix)}</pre>
         </div>`;
     }
     
     if (fim.middle) {
         html += `<div class="fim-section fim-middle">
-            <span class="fim-label">MIDDLE (Generated)</span>
+            <span class="fim-label">${t('label.middle_generated')}</span>
             <pre>${escapeHtml(fim.middle)}</pre>
         </div>`;
     }
     
     if (fim.suffix) {
         html += `<div class="fim-section fim-suffix">
-            <span class="fim-label">SUFFIX</span>
+            <span class="fim-label">${t('label.suffix')}</span>
             <pre>${escapeHtml(fim.suffix)}</pre>
         </div>`;
     }
@@ -1214,11 +1323,11 @@ function createFimHTML(fim) {
 }
 
 function createImgPlaceholder() {
-    return `<span class="img-placeholder" title="Image token">🖼️</span>`;
+    return `<span class="img-placeholder" title="${t('label.image_token')}">🖼️</span>`;
 }
 
 function createAudioPlaceholder() {
-    return `<span class="audio-placeholder" title="Audio token">🔊</span>`;
+    return `<span class="audio-placeholder" title="${t('label.audio_token')}">🔊</span>`;
 }
 
 function createArgsHTML(content) {
@@ -1238,7 +1347,7 @@ function createArgsHTML(content) {
 }
 
 function createCallIdBadge(id) {
-    return `<span class="call-id-badge" title="Call ID">#${escapeHtml(id)}</span>`;
+    return `<span class="call-id-badge" title="${t('label.call_id')}">#${escapeHtml(id)}</span>`;
 }
 
 function toggleSpecialToken(button) {
@@ -1266,14 +1375,14 @@ async function sendMessage(customContent = null) {
         await sendStepQuestionFromMain(content);
         // Clear tag after sending
         document.getElementById('inputTags').innerHTML = '';
-        messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+        messageInput.placeholder = t('placeholder.message');
         return;
     }
     
     // Clear step question context if not a step question
     currentStepQuestion = null;
     document.getElementById('inputTags').innerHTML = '';
-    messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+    messageInput.placeholder = t('placeholder.message');
     
     // Activate auto-scroll when sending message
     scrollLockUntil = 0;
@@ -1410,18 +1519,27 @@ async function sendMessage(customContent = null) {
                         
                         // Handle tool result events
                         if (data.tool_result) {
-                            updateToolResultBox(data.tool_result);
+                            try {
+                                updateToolResultBox(data.tool_result);
+                            } catch (e) {
+                                console.error('[stream] updateToolResultBox error:', e);
+                            }
                             scrollToBottom();
                             
-                            // Update Detail Panel with tool result
-                            if (detailPanelOpen && data.tool_result.step !== undefined) {
-                                const stepIndex = data.tool_result.step - 1; // Convert to 0-based
-                                addToolResultToDetailPanel(stepIndex, data.tool_result);
-                            }
                             if (nodeGraph && data.tool_result.step !== undefined) {
-                                const status = data.tool_result.success ? 'completed' : 'error';
+                                const hasMore = data.tool_result.tools_remaining && data.tool_result.tools_remaining > 0;
+                                const status = hasMore ? 'running' : (data.tool_result.success ? 'completed' : 'error');
                                 nodeGraph.setNodeStatus(`step-${data.tool_result.step}`, status);
                                 broadcastGraphMessage({ type: 'step-update', payload: { step: data.tool_result.step, status } });
+                            }
+                            
+                            if (data.tool_result.step !== undefined) {
+                                try {
+                                    const stepIndex = data.tool_result.step - 1;
+                                    addToolResultToDetailPanel(stepIndex, data.tool_result);
+                                } catch (e) {
+                                    console.error('[stream] addToolResultToDetailPanel error:', e);
+                                }
                             }
                         }
                         
@@ -1437,6 +1555,11 @@ async function sendMessage(customContent = null) {
                                 }
                             }
                             if (nodeGraph) {
+                                for (const [id, node] of nodeGraph.nodes) {
+                                    if (node.status === 'running' && id !== `step-${data.step_start.step}`) {
+                                        nodeGraph.setNodeStatus(id, 'completed');
+                                    }
+                                }
                                 nodeGraph.setNodeStatus(`step-${data.step_start.step}`, 'running');
                             }
                             broadcastGraphMessage({ type: 'step-update', payload: { step: data.step_start.step, status: 'running' } });
@@ -1456,14 +1579,23 @@ async function sendMessage(customContent = null) {
                                     updatePlanBoxWithResults(planBox, data.plan_complete);
                                 }
                                 
-                                // Trigger Detail Panel completion updates
-                                if (detailPanelOpen) {
-                                    onPlanComplete();
+                                if (data.plan_complete.results) {
+                                    data.plan_complete.results.forEach(r => {
+                                        if (r.step && !detailPanelData.results[r.step - 1]) {
+                                            detailPanelData.results[r.step - 1] = r;
+                                        }
+                                    });
                                 }
+                                
+                                // Trigger analysis (always, regardless of detail panel state)
+                                onPlanComplete();
                                 
                                 // Update currentMessages
                                 currentMessages.push({ role: 'user', content: displayContent });
                                 currentMessages.push({ role: 'assistant', content: fullContent });
+                                
+                                activePlanMsgIndex = currentMessages.length - 1;
+                                updatePlanBoxActiveState();
                                 
                                 // Update action buttons on BOTH messages
                                 const messageElements = messagesWrapper.querySelectorAll('.message');
@@ -1474,44 +1606,11 @@ async function sendMessage(customContent = null) {
                                     const userMsgEl = messageElements[messageElements.length - 2];
                                     const assistantMsgEl = messageElements[messageElements.length - 1];
                                     
-                                    // Re-render user message
                                     if (userMsgEl) {
-                                        userMsgEl.outerHTML = createMessageHTML(currentMessages[userMsgIndex], userMsgIndex);
+                                        updateMessageActions(userMsgEl, userMsgIndex, true);
                                     }
-                                    
-                                    // Update assistant message action buttons WITHOUT re-rendering (to avoid duplicate plan box)
                                     if (assistantMsgEl) {
-                                        // Set data-index attribute
-                                        assistantMsgEl.setAttribute('data-index', assistantMsgIndex);
-                                        
-                                        // Find or create actions div
-                                        let actionsDiv = assistantMsgEl.querySelector('.message-actions');
-                                        if (!actionsDiv) {
-                                            actionsDiv = document.createElement('div');
-                                            actionsDiv.className = 'message-actions';
-                                            assistantMsgEl.appendChild(actionsDiv);
-                                        }
-                                        
-                                        // Set action buttons HTML for assistant message
-                                        actionsDiv.innerHTML = `
-                                            <button class="message-action-btn" onclick="regenerateFrom(${assistantMsgIndex})" title="Regenerate">
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                    <path d="M23 4v6h-6M1 20v-6h6"/>
-                                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-                                                </svg>
-                                            </button>
-                                            <button class="message-action-btn" onclick="copyMessage(${assistantMsgIndex})" title="Copy">
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                                                </svg>
-                                            </button>
-                                            <button class="message-action-btn delete-btn" onclick="deleteFromMessage(${assistantMsgIndex})" title="Delete from here">
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                                                </svg>
-                                            </button>
-                                        `;
+                                        updateMessageActions(assistantMsgEl, assistantMsgIndex, false);
                                     }
                                 }
                                 
@@ -1595,14 +1694,11 @@ async function sendMessage(customContent = null) {
                                 const userMsgEl = messageElements[messageElements.length - 2];
                                 const assistantMsgEl = messageElements[messageElements.length - 1];
                                 
-                                // Re-render user message with correct index
                                 if (userMsgEl) {
-                                    userMsgEl.outerHTML = createMessageHTML(currentMessages[userMsgIndex], userMsgIndex);
+                                    updateMessageActions(userMsgEl, userMsgIndex, true);
                                 }
-                                
-                                // Re-render assistant message (plan box is already created by createMessageHTML from saved content)
                                 if (assistantMsgEl) {
-                                    assistantMsgEl.outerHTML = createMessageHTML(currentMessages[assistantMsgIndex], assistantMsgIndex);
+                                    updateMessageActions(assistantMsgEl, assistantMsgIndex, false);
                                 }
                             }
                             
@@ -1610,7 +1706,7 @@ async function sendMessage(customContent = null) {
                         }
                         
                         if (data.error) {
-                            contentDiv.innerHTML = `<div class="error">Error: ${escapeHtml(data.error)}</div>`;
+                            contentDiv.innerHTML = `<div class="error">${t('error.generic', { message: escapeHtml(data.error) })}</div>`;
                             await reader.cancel();
                             return;
                         }
@@ -1641,11 +1737,10 @@ async function sendMessage(customContent = null) {
                 const assistantMsgEl = messageElements[messageElements.length - 1];
                 
                 if (userMsgEl) {
-                    userMsgEl.outerHTML = createMessageHTML(currentMessages[userMsgIndex], userMsgIndex);
+                    updateMessageActions(userMsgEl, userMsgIndex, true);
                 }
-                
                 if (assistantMsgEl) {
-                    assistantMsgEl.outerHTML = createMessageHTML(currentMessages[assistantMsgIndex], assistantMsgIndex);
+                    updateMessageActions(assistantMsgEl, assistantMsgIndex, false);
                 }
             }
         }
@@ -1684,42 +1779,17 @@ async function sendMessage(customContent = null) {
                 const userMsgEl = messageElements[messageElements.length - 2];
                 const assistantMsgEl = messageElements[messageElements.length - 1];
                 if (userMsgEl) {
-                    userMsgEl.setAttribute('data-index', userMsgIndex);
+                    updateMessageActions(userMsgEl, userMsgIndex, true);
                 }
                 if (assistantMsgEl) {
-                    assistantMsgEl.setAttribute('data-index', assistantMsgIndex);
-                    let actionsDiv = assistantMsgEl.querySelector('.message-actions');
-                    if (!actionsDiv) {
-                        actionsDiv = document.createElement('div');
-                        actionsDiv.className = 'message-actions';
-                        assistantMsgEl.appendChild(actionsDiv);
-                    }
-                    actionsDiv.innerHTML = `
-                        <button class="message-action-btn" onclick="regenerateFrom(${assistantMsgIndex})" title="Regenerate">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M23 4v6h-6M1 20v-6h6"/>
-                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-                            </svg>
-                        </button>
-                        <button class="message-action-btn" onclick="copyMessage(${assistantMsgIndex})" title="Copy">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                            </svg>
-                        </button>
-                        <button class="message-action-btn delete-btn" onclick="deleteFromMessage(${assistantMsgIndex})" title="Delete from here">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                            </svg>
-                        </button>
-                    `;
+                    updateMessageActions(assistantMsgEl, assistantMsgIndex, false);
                 }
             }
 
             await loadConversations();
         } else {
             console.error('Error sending message:', error);
-            contentDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            contentDiv.innerHTML = `<div class="error">${t('error.generic', { message: escapeHtml(error.message) })}</div>`;
         }
     } finally {
         isStreaming = false;
@@ -1736,10 +1806,65 @@ function appendMessage(message) {
     const messageDiv = document.createElement('div');
     messageDiv.innerHTML = createMessageHTML(message);
     const messageElement = messageDiv.firstElementChild;
+    messageElement.classList.add('message-new');
+    messageElement.addEventListener('animationend', () => {
+        messageElement.classList.remove('message-new');
+    }, { once: true });
     messagesWrapper.appendChild(messageElement);
     
     scrollToBottom();
     return messageElement;
+}
+
+function updateMessageActions(el, index, isUser) {
+    el.setAttribute('data-index', index);
+    let actionsDiv = el.querySelector('.message-actions');
+    if (!actionsDiv) {
+        actionsDiv = document.createElement('div');
+        actionsDiv.className = 'message-actions';
+        el.appendChild(actionsDiv);
+    }
+    if (isUser) {
+        actionsDiv.innerHTML = `
+            <button class="message-action-btn" onclick="editMessage(${index})" title="${t('tooltip.edit_resend')}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+            </button>
+            <button class="message-action-btn" onclick="copyMessage(${index})" title="${t('tooltip.copy_msg')}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+            </button>
+            <button class="message-action-btn delete-btn" onclick="deleteFromMessage(${index})" title="${t('tooltip.delete_from')}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+            </button>
+        `;
+    } else {
+        actionsDiv.innerHTML = `
+            <button class="message-action-btn" onclick="regenerateFrom(${index})" title="${t('label.regenerate')}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 4v6h-6M1 20v-6h6"/>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+            </button>
+            <button class="message-action-btn" onclick="copyMessage(${index})" title="${t('tooltip.copy_msg')}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+            </button>
+            <button class="message-action-btn delete-btn" onclick="deleteFromMessage(${index})" title="${t('tooltip.delete_from')}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+            </button>
+        `;
+    }
 }
 
 function updateAssistantMessage(contentDiv, content) {
@@ -1817,16 +1942,164 @@ function updateAssistantMessage(contentDiv, content) {
 // Model Info
 // ============================================
 
+let currentModelMode = 'local';
+let currentApiProvider = '';
+let currentApiModel = '';
+
 async function getModelInfo() {
     try {
         const response = await fetch('/api/model');
         if (!response.ok) throw new Error('Failed to get model info');
         
         const data = await response.json();
-        modelName.textContent = data.model || 'Unknown';
+        currentModelMode = data.mode || 'local';
+        currentApiProvider = data.provider || '';
+        currentApiModel = data.api_model || '';
+        
+        if (currentModelMode === 'api' && currentApiModel) {
+            modelName.textContent = currentApiModel;
+        } else {
+            modelName.textContent = data.model || t('label.unknown');
+        }
+        
     } catch (error) {
         console.error('Error getting model info:', error);
-        modelName.textContent = 'Error loading';
+        modelName.textContent = t('error.model_load');
+    }
+}
+
+async function switchToModel(mode, modelNameStr, provider) {
+    try {
+        const body = { mode, model_name: modelNameStr, provider: provider || '' };
+        const response = await fetch('/api/model/switch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!response.ok) throw new Error('Switch failed');
+        const data = await response.json();
+        if (data.active) {
+            currentModelMode = data.active.mode;
+            currentApiProvider = data.active.api_provider || '';
+            currentApiModel = data.active.api_model || '';
+        }
+        await getModelInfo();
+        closeModelDropdown();
+    } catch (error) {
+        console.error('Error switching model:', error);
+        alert(t('error.model_switch_failed'));
+    }
+}
+
+let modelDropdownEl = null;
+
+function toggleModelDropdown() {
+    if (modelDropdownEl) {
+        closeModelDropdown();
+        return;
+    }
+    openModelDropdown();
+}
+
+function closeModelDropdown() {
+    if (modelDropdownEl) {
+        modelDropdownEl.remove();
+        modelDropdownEl = null;
+    }
+    document.removeEventListener('click', _modelDropdownOutsideClick);
+}
+
+function _modelDropdownOutsideClick(e) {
+    const selector = document.getElementById('modelSelector');
+    if (modelDropdownEl && !modelDropdownEl.contains(e.target) && !selector.contains(e.target)) {
+        closeModelDropdown();
+    }
+}
+
+async function openModelDropdown() {
+    closeModelDropdown();
+    
+    try {
+        const response = await fetch('/api/models');
+        if (!response.ok) throw new Error('Failed to fetch models');
+        const data = await response.json();
+        
+        const dropdown = document.createElement('div');
+        dropdown.className = 'model-dropdown';
+        
+        // Local models section
+        const localHeader = document.createElement('div');
+        localHeader.className = 'model-dropdown-section';
+        localHeader.textContent = t('label.local_models');
+        dropdown.appendChild(localHeader);
+        
+        if (data.local && data.local.length > 0) {
+            for (const m of data.local) {
+                const item = document.createElement('div');
+                item.className = 'model-dropdown-item';
+                if (data.active.mode === 'local' && data.active.local_model === m) {
+                    item.classList.add('active');
+                }
+                item.textContent = m;
+                item.addEventListener('click', () => switchToModel('local', m, ''));
+                dropdown.appendChild(item);
+            }
+        } else {
+            const empty = document.createElement('div');
+            empty.className = 'model-dropdown-item disabled';
+            empty.textContent = t('label.no_models');
+            dropdown.appendChild(empty);
+        }
+        
+        // Divider
+        const divider = document.createElement('div');
+        divider.className = 'model-dropdown-divider';
+        dropdown.appendChild(divider);
+        
+        // API models section (grouped by provider)
+        const apiHeader = document.createElement('div');
+        apiHeader.className = 'model-dropdown-section';
+        apiHeader.textContent = t('label.api_models');
+        dropdown.appendChild(apiHeader);
+        
+        if (data.api) {
+            for (const [providerName, providerData] of Object.entries(data.api)) {
+                for (const m of providerData.models) {
+                    const item = document.createElement('div');
+                    item.className = 'model-dropdown-item';
+                    if (!providerData.has_key) {
+                        item.classList.add('disabled');
+                    }
+                    if (data.active.mode === 'api' && data.active.api_provider === providerName && data.active.api_model === m) {
+                        item.classList.add('active');
+                    }
+                    
+                    const nameSpan = document.createElement('span');
+                    nameSpan.textContent = m;
+                    item.appendChild(nameSpan);
+                    
+                    const badge = document.createElement('span');
+                    badge.className = 'provider-badge';
+                    badge.textContent = providerName;
+                    item.appendChild(badge);
+                    
+                    if (providerData.has_key) {
+                        item.addEventListener('click', () => switchToModel('api', m, providerName));
+                    }
+                    dropdown.appendChild(item);
+                }
+            }
+        }
+        
+        const selector = document.getElementById('modelSelector');
+        selector.appendChild(dropdown);
+        modelDropdownEl = dropdown;
+        
+        setTimeout(() => {
+            document.addEventListener('click', _modelDropdownOutsideClick);
+        }, 10);
+    } catch (error) {
+        console.error('Error loading model list:', error);
     }
 }
 
@@ -1892,7 +2165,7 @@ function updateBgPreview() {
         preview.textContent = '';
     } else {
         preview.style.backgroundImage = '';
-        preview.textContent = 'No image selected';
+        preview.textContent = t('label.no_image');
     }
 }
 
@@ -1961,6 +2234,8 @@ function scrollToBottom(force = false) {
 }
 
 function renderMarkdown(text) {
+    if (Array.isArray(text)) text = text.join('\n');
+    else if (typeof text !== 'string') text = String(text ?? '');
     if (typeof marked !== 'undefined') {
         return marked.parse(text || '');
     }
@@ -1985,7 +2260,8 @@ function renderMath() {
 // Loading State
 // ============================================
 
-function showLoading(text = 'Loading...') {
+function showLoading(text = null) {
+    if (!text) text = t('status.loading');
     loadingOverlay.querySelector('.loading-text').textContent = text;
     loadingOverlay.classList.add('active');
 }
@@ -2004,13 +2280,13 @@ function setStreamingUI(streaming) {
         sendBtn.disabled = false;
         sendIcon.style.display = 'none';
         stopIcon.style.display = 'block';
-        sendBtn.title = 'Stop generation';
+        sendBtn.title = t('tooltip.stop');
     } else {
         sendBtn.classList.remove('streaming');
         sendBtn.disabled = false;
         sendIcon.style.display = 'block';
         stopIcon.style.display = 'none';
-        sendBtn.title = 'Send message (Enter)';
+        sendBtn.title = t('tooltip.send');
     }
 }
 
@@ -2055,8 +2331,8 @@ async function editMessage(index) {
     contentDiv.innerHTML = `
         <textarea class="edit-textarea">${escapeHtml(originalContent)}</textarea>
         <div class="edit-actions">
-            <button class="edit-btn save" onclick="saveEdit(${index})">Save & Send</button>
-            <button class="edit-btn cancel" onclick="cancelEdit(${index})">Cancel</button>
+            <button class="edit-btn save" onclick="saveEdit(${index})">${t('label.save_send')}</button>
+            <button class="edit-btn cancel" onclick="cancelEdit(${index})">${t('label.cancel')}</button>
         </div>
     `;
     
@@ -2151,14 +2427,12 @@ async function copyMessage(index) {
 async function deleteFromMessage(index) {
     if (!currentConversationId) return;
     
-    // Stop first if generating
     if (isStreaming) {
         stopGeneration();
-        await new Promise(r => setTimeout(r, 500));  // Brief wait
+        await new Promise(r => setTimeout(r, 500));
     }
     
-    // Confirmation dialog
-    if (!confirm('Delete this message and all following messages?')) return;
+    if (!confirm(t('confirm.delete_from_here'))) return;
     
     try {
         const response = await fetch(`/api/conversation/${currentConversationId}/truncate`, {
@@ -2168,7 +2442,19 @@ async function deleteFromMessage(index) {
         });
         
         if (response.ok) {
-            await loadConversation(currentConversationId);
+            const messageElements = messagesWrapper.querySelectorAll('.message');
+            for (let i = messageElements.length - 1; i >= 0; i--) {
+                const dataIdx = parseInt(messageElements[i].getAttribute('data-index'), 10);
+                if (dataIdx >= index) {
+                    messageElements[i].remove();
+                }
+            }
+            currentMessages = currentMessages.slice(0, index);
+            if (currentMessages.length === 0) {
+                welcomeMessage.style.display = '';
+            }
+            restoreDetailPanelFromMessages(currentMessages);
+            await loadConversations();
         }
     } catch (error) {
         console.error('Error deleting messages:', error);
@@ -2178,14 +2464,11 @@ async function deleteFromMessage(index) {
 async function regenerateFrom(index) {
     if (!currentConversationId || isStreaming) return;
     
-    // Get the user message before this assistant message
     const prevMessage = currentMessages[index - 1];
     if (!prevMessage || prevMessage.role !== 'user') return;
     
     const userContent = prevMessage.content;
     
-    // Truncate from the user message (index - 1)
-    // sendMessage will re-add the user message
     try {
         const response = await fetch(`/api/conversation/${currentConversationId}/truncate`, {
             method: 'POST',
@@ -2194,9 +2477,14 @@ async function regenerateFrom(index) {
         });
         
         if (response.ok) {
-            // Reload and regenerate
-            await loadConversation(currentConversationId);
-            // Send the same user message again
+            const messageElements = messagesWrapper.querySelectorAll('.message');
+            for (let i = messageElements.length - 1; i >= 0; i--) {
+                const dataIdx = parseInt(messageElements[i].getAttribute('data-index'), 10);
+                if (dataIdx >= index - 1) {
+                    messageElements[i].remove();
+                }
+            }
+            currentMessages = currentMessages.slice(0, index - 1);
             await sendMessage(userContent);
         }
     } catch (error) {
@@ -2219,7 +2507,7 @@ function closeModal(modalId) {
 // Rename Modal
 document.getElementById('renameBtn').addEventListener('click', async () => {
     if (!currentConversationId) {
-        alert('No conversation selected');
+        alert(t('error.no_conversation'));
         return;
     }
     
@@ -2247,12 +2535,15 @@ async function saveRename() {
         closeModal('renameModal');
     } catch (error) {
         console.error('Error renaming:', error);
-        alert('Failed to rename conversation');
+        alert(t('error.rename_failed'));
     }
 }
 
 // System Prompt Modal
+let _systemPromptIsReset = false;
+
 document.getElementById('systemPromptBtn').addEventListener('click', async () => {
+    _systemPromptIsReset = false;
     try {
         const response = await fetch('/api/system_prompt');
         if (!response.ok) throw new Error('Failed to get system prompt');
@@ -2265,22 +2556,39 @@ document.getElementById('systemPromptBtn').addEventListener('click', async () =>
     }
 });
 
+document.getElementById('resetSystemPromptBtn').addEventListener('click', async () => {
+    try {
+        const response = await fetch('/api/system_prompt/default');
+        if (!response.ok) throw new Error('Failed to get default');
+        const data = await response.json();
+        document.getElementById('systemPromptInput').value = data.system_prompt || '';
+        _systemPromptIsReset = true;
+    } catch (error) {
+        console.error('Error resetting system prompt:', error);
+    }
+});
+
 async function saveSystemPrompt() {
     const systemPrompt = document.getElementById('systemPromptInput').value;
     
     try {
+        const body = _systemPromptIsReset
+            ? { system_prompt: systemPrompt, reset: true }
+            : { system_prompt: systemPrompt };
+        
         const response = await fetch('/api/system_prompt', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ system_prompt: systemPrompt })
+            body: JSON.stringify(body)
         });
         
         if (!response.ok) throw new Error('Failed to save');
         
+        _systemPromptIsReset = false;
         closeModal('systemPromptModal');
     } catch (error) {
         console.error('Error saving system prompt:', error);
-        alert('Failed to save system prompt');
+        alert(t('error.save_failed'));
     }
 }
 
@@ -2331,6 +2639,30 @@ document.getElementById('settingsBtn').addEventListener('click', async () => {
             langSelect.appendChild(opt);
         }
         langSelect.value = getCurrentLanguage();
+        
+        // Load API keys status
+        try {
+            const keysResponse = await fetch('/api/api-keys');
+            if (keysResponse.ok) {
+                const keys = await keysResponse.json();
+                const keyMapping = { openai: 'settingOpenaiKey', anthropic: 'settingAnthropicKey', google: 'settingGoogleKey' };
+                for (const [provider, inputId] of Object.entries(keyMapping)) {
+                    const input = document.getElementById(inputId);
+                    if (input && keys[provider]) {
+                        input.value = keys[provider].masked || '';
+                        input.placeholder = keys[provider].has_key ? keys[provider].masked : t('placeholder.api_key');
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Error loading API keys:', e);
+        }
+        
+        // Reset to General tab
+        document.querySelectorAll('.settings-nav-item').forEach(n => n.classList.toggle('active', n.dataset.tab === 'general'));
+        document.querySelectorAll('.settings-tab-content').forEach(tc => tc.classList.remove('active'));
+        const generalTab = document.getElementById('settingsGeneral');
+        if (generalTab) generalTab.classList.add('active');
         
         openModal('settingsModal');
     } catch (error) {
@@ -2420,6 +2752,7 @@ async function saveSettings() {
     }
     
     try {
+        // Save general settings
         const response = await fetch('/api/settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2428,15 +2761,37 @@ async function saveSettings() {
         
         if (!response.ok) throw new Error('Failed to save');
         
-        // Reload messages to update display names
-        if (currentConversationId) {
+        // Save API keys (only if user entered new values)
+        const apiKeyFields = [
+            { id: 'settingOpenaiKey', provider: 'openai' },
+            { id: 'settingAnthropicKey', provider: 'anthropic' },
+            { id: 'settingGoogleKey', provider: 'google' }
+        ];
+        
+        for (const field of apiKeyFields) {
+            const input = document.getElementById(field.id);
+            if (input && input.value && !input.value.includes('...')) {
+                await fetch('/api/api-keys', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider: field.provider, api_key: input.value })
+                });
+            }
+        }
+        
+        // Update display names in-place without re-rendering (safe during streaming)
+        if (currentConversationId && !isStreaming) {
             await loadConversation(currentConversationId);
+        } else {
+            document.querySelectorAll('.message.user .message-name').forEach(el => {
+                el.textContent = getUserDisplayName();
+            });
         }
         
         closeModal('settingsModal');
     } catch (error) {
         console.error('Error saving settings:', error);
-        alert('Failed to save settings');
+        alert(t('error.save_failed'));
     }
 }
 
@@ -2540,7 +2895,8 @@ function createPlanStepsBox(toolCall) {
         `;
     });
     
-    box.innerHTML = `${goalHTML}<div class="plan-steps">${stepsHTML}</div>`;
+    const analyzingRow = `<div class="plan-analyzing-row"><span class="analyzing-icon">◎</span><span>Analysis</span></div>`;
+    box.innerHTML = `${goalHTML}<div class="plan-steps">${stepsHTML}</div>${analyzingRow}`;
     toolCallBoxes['create_plan'] = box.id;
     return box;
 }
@@ -2568,7 +2924,7 @@ function toggleStepResult(header) {
 function toggleThinkSection(toggle) {
     const section = toggle.closest('.think-section-minimal');
     section.classList.toggle('collapsed');
-    toggle.textContent = section.classList.contains('collapsed') ? 'Think ▶' : 'Think ▼';
+    toggle.textContent = section.classList.contains('collapsed') ? t('label.think') + ' ▶' : t('label.think') + ' ▼';
 }
 
 // ============================================
@@ -2666,13 +3022,17 @@ async function retryStep(stepNum) {
                             
                             // Tool result received
                             if (data.tool_result) {
-                                toolResultContent = formatStepResult(data.tool_result.result);
+                                const tr = data.tool_result.result || {};
+                                if (typeof tr === 'object' && !tr.step) tr.step = stepNum;
+                                toolResultContent = formatStepResult(tr);
                                 resultEl.innerHTML = toolResultContent;
                             }
                             
                             // Legacy: direct result (for backward compatibility)
                             if (data.result) {
-                                toolResultContent = formatStepResult(data.result);
+                                const dr = data.result;
+                                if (typeof dr === 'object' && !dr.step) dr.step = stepNum;
+                                toolResultContent = formatStepResult(dr);
                                 resultEl.innerHTML = toolResultContent;
                             }
                             
@@ -2919,7 +3279,7 @@ function removeStepTag() {
     const inputTags = document.getElementById('inputTags');
     inputTags.innerHTML = '';
     currentStepQuestion = null;
-    messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+    messageInput.placeholder = t('placeholder.message');
 }
 
 /**
@@ -3015,7 +3375,7 @@ async function sendStepQuestionFromMain(question) {
     if (!currentStepQuestion || !currentConversationId) {
         // Remove tag and return
         document.getElementById('inputTags').innerHTML = '';
-        messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+        messageInput.placeholder = t('placeholder.message');
         currentStepQuestion = null;
         return;
     }
@@ -3028,7 +3388,7 @@ async function sendStepQuestionFromMain(question) {
     
     // Remove tag immediately (at send time)
     document.getElementById('inputTags').innerHTML = '';
-    messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+    messageInput.placeholder = t('placeholder.message');
     
     // Hide welcome message
     if (welcomeMessage) welcomeMessage.style.display = 'none';
@@ -3060,7 +3420,7 @@ async function sendStepQuestionFromMain(question) {
         console.error('contentDiv not found in assistant message');
         // Remove tag and return
         document.getElementById('inputTags').innerHTML = '';
-        messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+        messageInput.placeholder = t('placeholder.message');
         currentStepQuestion = null;
         return;
     }
@@ -3142,7 +3502,7 @@ async function sendStepQuestionFromMain(question) {
         currentStepQuestion = null;
         // Ensure tag is removed
         document.getElementById('inputTags').innerHTML = '';
-        messageInput.placeholder = 'Type your message... (Shift+Enter for new line)';
+        messageInput.placeholder = t('placeholder.message');
     }
 }
 
@@ -3167,6 +3527,45 @@ function mergeResultsByStep(results) {
 }
 
 /**
+ * Extract section headers (and optionally the first sentence of each) from
+ * a summary string for abbreviated display in the plan box.
+ * Recognises numbered headers ("1. Foo"), markdown headers ("## Foo"),
+ * and bold-line headers ("**Foo**").
+ */
+function extractSummaryHeaders(text) {
+    if (!text) return '';
+    const lines = text.split('\n');
+    const headerRe = /^(?:\d+[\.\)]\s+|#{1,3}\s+|\*\*[^*]+\*\*)/;
+    const extracted = [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line || !headerRe.test(line)) continue;
+
+        let entry = line;
+        // If the header line itself is short (title only), append first sentence from next content line
+        if (line.length < 60) {
+            for (let j = i + 1; j < lines.length; j++) {
+                const next = lines[j].trim();
+                if (!next) continue;
+                if (headerRe.test(next)) break;
+                const dot = next.indexOf('.');
+                const sentence = dot > 0 ? next.substring(0, dot + 1) : next.substring(0, 80);
+                entry += ' - ' + sentence;
+                break;
+            }
+        }
+        extracted.push(entry);
+    }
+    if (extracted.length === 0) {
+        const dot = text.indexOf('.');
+        return dot > 0 && dot < 200
+            ? text.substring(0, dot + 1) + ' ...'
+            : text.substring(0, 200) + (text.length > 200 ? ' ...' : '');
+    }
+    return extracted.join('\n');
+}
+
+/**
  * Format tool result for display in a plan step
  * Minimal text-only design without backgrounds, borders, or icons
  */
@@ -3182,7 +3581,7 @@ function formatStepResult(toolResult) {
     if (toolResult.thought) {
         html += `
             <div class="think-section-minimal collapsed">
-                <span class="think-toggle" onclick="toggleThinkSection(this)">Think ▶</span>
+                <span class="think-toggle" onclick="toggleThinkSection(this)">${t('label.think')} ▶</span>
                 <div class="think-content">${renderMarkdown(toolResult.thought)}</div>
             </div>
         `;
@@ -3200,11 +3599,11 @@ function formatStepResult(toolResult) {
         const execId = 'exec-' + Math.random().toString(36).slice(2, 9);
         let fixInfo = '';
         if (result.fix_attempts > 0) {
-            fixInfo = `<div class="code-fix-info">Auto-corrected (${result.fix_attempts} ${result.fix_attempts === 1 ? 'retry' : 'retries'})</div>`;
+            fixInfo = `<div class="code-fix-info">${t('label.auto_corrected', { count: result.fix_attempts })}</div>`;
         }
         html += `<div class="step-section-minimal">
-            <span class="section-label-minimal">Code Generated</span>
-            <div class="code-gen-summary">${lineCount} lines of ${escapeHtml(result.language || 'python')} (view in Code tab)</div>
+            <span class="section-label-minimal">${t('label.code_generated')}</span>
+            <div class="code-gen-summary">${t('label.code_summary', { lines: lineCount, lang: escapeHtml(result.language || 'python') })}</div>
             ${fixInfo}
             <div class="step-exec-result" id="${execId}"></div>
         </div>`;
@@ -3219,10 +3618,16 @@ function formatStepResult(toolResult) {
         return html;
     }
 
-    if (result && (result.title || result.details)) {
-        const detailsHtml = result.details && Array.isArray(result.details)
-            ? `<ul class="result-details-minimal">${result.details.map(d => `<li>${renderMarkdown(d)}</li>`).join('')}</ul>`
-            : '';
+    if (result && (result.title || result.details || result.summary)) {
+        let summaryHtml = '';
+        if (result.summary) {
+            const summaryText = Array.isArray(result.summary) ? result.summary.join('\n') : result.summary;
+            const abbreviated = extractSummaryHeaders(summaryText);
+            summaryHtml = `<div class="step-brief-summary">${renderMarkdown(abbreviated)}</div>`;
+        } else if (result.details && Array.isArray(result.details) && result.details.length > 0) {
+            const moreIndicator = result.details.length > 1 ? ' ...' : '';
+            summaryHtml = `<div class="step-brief-summary">${renderMarkdown(String(result.details[0]) + moreIndicator)}</div>`;
+        }
 
         let graphHtml = '';
         if (result.has_graph) {
@@ -3233,16 +3638,25 @@ function formatStepResult(toolResult) {
             }
         }
 
-        const metaHtml = (result.duration || result.tokens)
-            ? `<div class="result-meta-minimal">${result.duration || ''}${result.duration && result.tokens ? ' · ' : ''}${result.tokens ? result.tokens + ' tokens' : ''}</div>`
+        const metaText = (result.duration || result.tokens)
+            ? `${result.duration || ''}${result.duration && result.tokens ? ' · ' : ''}${result.tokens ? result.tokens + ' tokens' : ''}`
+            : '';
+
+        const stepIdx = toolResult.step ? toolResult.step - 1 : null;
+        const moreBtn = stepIdx != null
+            ? `<button class="step-more-detail-btn" onclick="scrollToStepOutput(${stepIdx})">${t('label.more_detail')}</button>`
+            : '';
+
+        const metaLine = (metaText || moreBtn)
+            ? `<div class="result-meta-line">${moreBtn}${metaText ? `<span class="result-meta-minimal">${metaText}</span>` : ''}</div>`
             : '';
 
         html += `
             <div class="step-section-minimal">
                 <span class="section-label-minimal">${escapeHtml(result.title || t('label.result'))}</span>
-                ${detailsHtml}
+                ${summaryHtml}
                 ${graphHtml}
-                ${metaHtml}
+                ${metaLine}
             </div>
         `;
     } else if (!html && result) {
@@ -3381,13 +3795,18 @@ function updatePlanStepResult(toolName, toolResult) {
     }
     if (!stepEl) return false;
     
-    // Update step status
-    stepEl.classList.remove('pending', 'running');
-    stepEl.classList.add(toolResult.success ? 'completed' : 'error');
+    // Update step status (keep running if more tools remain for this step)
+    if (toolResult.tools_remaining && toolResult.tools_remaining > 0) {
+        stepEl.classList.remove('pending');
+        stepEl.classList.add('running');
+    } else {
+        stepEl.classList.remove('pending', 'running');
+        stepEl.classList.add(toolResult.success ? 'completed' : 'error');
+    }
     
     // Update indicator
     const indicator = stepEl.querySelector('.step-indicator');
-    if (indicator) {
+    if (indicator && !(toolResult.tools_remaining && toolResult.tools_remaining > 0)) {
         indicator.textContent = toolResult.success ? '✓' : '!';
     }
     
@@ -3462,7 +3881,8 @@ function updatePlanBoxWithResults(planBox, planData) {
                 thought: r.thought,
                 action: r.action,
                 error: r.error,
-                result: r.result
+                result: r.result,
+                step: parseInt(step)
             })).join('<hr class="tool-result-divider">');
             
             const toggle = stepEl.querySelector('.step-toggle');
@@ -3740,11 +4160,6 @@ function updatePlanStep(stepId, status) {
  * Initialize Detail Panel event listeners
  */
 function setupDetailPanelListeners() {
-    // Close button
-    if (detailClose) {
-        detailClose.addEventListener('click', closeDetailPanel);
-    }
-    
     // Toggle button
     if (detailToggle) {
         detailToggle.addEventListener('click', toggleDetailPanel);
@@ -3828,7 +4243,7 @@ function openDetailPanel(planData) {
                 nodeGraph._relayoutVertical();
                 nodeGraph.fitToView();
                 if (currentConversationId) {
-                    localStorage.setItem('graphState-' + currentConversationId, JSON.stringify(nodeGraph.getState()));
+                    localStorage.setItem(_graphStateKey(), JSON.stringify(nodeGraph.getState()));
                 }
                 nodeGraph._needsLayout = null;
             }, 100);
@@ -3842,6 +4257,12 @@ function openDetailPanel(planData) {
 
 function showDetailPanelUI() {
     if (detailPanel) detailPanel.style.display = 'flex';
+    if (!detailPanelManuallyResized) {
+        const chatDetailContainer = document.querySelector('.chat-detail-container');
+        if (chatDetailContainer && chatDetailContainer.clientWidth > 0) {
+            detailPanelWidth = Math.max(300, chatDetailContainer.clientWidth * 0.4);
+        }
+    }
     document.documentElement.style.setProperty('--detail-panel-width', detailPanelWidth + 'px');
     if (detailResizeHandle) detailResizeHandle.style.display = 'block';
     if (detailToggle) {
@@ -3878,7 +4299,7 @@ function toggleDetailPanel() {
  * Reset Detail Panel to empty state (keep panel visible)
  */
 function hideDetailPanel() {
-    // Reset detail panel data
+    activePlanMsgIndex = -1;
     detailPanelData = {
         goal: '',
         steps: [],
@@ -3906,6 +4327,19 @@ function hideDetailPanel() {
     
     // Clear graph
     if (nodeGraph) nodeGraph.clear();
+
+    // Clear code tab
+    currentCodeStep = null;
+    const codeContent = document.getElementById('codeContent');
+    if (codeContent) codeContent.innerHTML = '<div class="code-empty-state">' + t('empty.code_hint') + '</div>';
+    const codeStepSelector = document.getElementById('codeStepSelector');
+    if (codeStepSelector) codeStepSelector.innerHTML = '';
+    const codeActions = document.getElementById('codeActions');
+    if (codeActions) codeActions.style.display = 'none';
+
+    // Clear outputs tab
+    const outputsContent = document.getElementById('outputsContent');
+    if (outputsContent) outputsContent.innerHTML = '<div class="outputs-empty-state">' + t('empty.outputs_hint') + '</div>';
 }
 
 /**
@@ -3923,7 +4357,7 @@ function restoreDetailPanelFromMessages(messages) {
                 try {
                     lastPlanData = JSON.parse(match[1].trim());
                     lastPlanMsgIdx = i;
-                } catch (e) { /* ignore parse errors */ }
+                } catch (e) { console.warn('[restoreDetailPanel] PLAN_COMPLETE JSON parse failed:', e.message); }
                 break;
             }
         }
@@ -3936,11 +4370,14 @@ function restoreDetailPanelFromMessages(messages) {
                 break;
             }
         }
+        activePlanMsgIndex = lastPlanMsgIdx;
         openDetailPanelFromSaved(lastPlanData);
+        updatePlanBoxActiveState();
         return;
     }
     
     let toolCallPlan = null;
+    let toolCallMsgIdx = -1;
     let userGoal = '';
     for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
@@ -3948,6 +4385,7 @@ function restoreDetailPanelFromMessages(messages) {
             const parsed = parseSpecialTokens(msg.content);
             if (parsed.toolCalls && typeof parsed.toolCalls === 'object' && parsed.toolCalls.name === 'create_plan') {
                 toolCallPlan = parsed.toolCalls.arguments;
+                toolCallMsgIdx = i;
                 for (let j = i - 1; j >= 0; j--) {
                     if (messages[j].role === 'user') {
                         userGoal = (messages[j].content || '').replace(/\[Image: [^\]]+\]\s*/g, '').replace(/\[Audio: [^\]]+\]\s*/g, '').replace(/\[Document: [^\]]+\]\s*/g, '').trim();
@@ -3960,6 +4398,7 @@ function restoreDetailPanelFromMessages(messages) {
     }
     
     if (toolCallPlan) {
+        activePlanMsgIndex = toolCallMsgIdx;
         openDetailPanel({
             goal: toolCallPlan.goal || userGoal || '',
             userMessage: userGoal || '',
@@ -3970,8 +4409,11 @@ function restoreDetailPanelFromMessages(messages) {
                 description: s.description || ''
             }))
         });
+        updatePlanBoxActiveState();
     } else {
+        activePlanMsgIndex = -1;
         hideDetailPanel();
+        updatePlanBoxActiveState();
     }
 }
 
@@ -3979,6 +4421,48 @@ function restoreDetailPanelFromMessages(messages) {
  * Open detail panel from saved plan data (including results).
  * Similar to openDetailPanel but restores completed results too.
  */
+function switchToPlan(msgIdx) {
+    const msg = currentMessages[msgIdx];
+    if (!msg || msg.role !== 'assistant') return;
+
+    const parsed = parseSpecialTokens(msg.content || '');
+
+    if (parsed.planComplete) {
+        for (let j = msgIdx - 1; j >= 0; j--) {
+            if (currentMessages[j].role === 'user') {
+                parsed.planComplete.userMessage = currentMessages[j].content.replace(/\[Image:.*?\]/g, '').replace(/\[Audio:.*?\]/g, '').replace(/\[Document:.*?\]/g, '').trim();
+                break;
+            }
+        }
+        activePlanMsgIndex = msgIdx;
+        openDetailPanelFromSaved(parsed.planComplete);
+        updatePlanBoxActiveState();
+    } else if (parsed.toolCalls && typeof parsed.toolCalls === 'object' && parsed.toolCalls.name === 'create_plan') {
+        let userGoal = '';
+        for (let j = msgIdx - 1; j >= 0; j--) {
+            if (currentMessages[j].role === 'user') { userGoal = currentMessages[j].content; break; }
+        }
+        activePlanMsgIndex = msgIdx;
+        openDetailPanel({
+            goal: parsed.toolCalls.arguments?.goal || userGoal,
+            userMessage: userGoal,
+            steps: (parsed.toolCalls.arguments?.steps || []).map((s, i) => ({
+                id: i + 1, name: s.name || '', tool: s.tool || '', description: s.description || ''
+            }))
+        });
+        updatePlanBoxActiveState();
+    }
+}
+
+function updatePlanBoxActiveState() {
+    if (!messagesWrapper) return;
+    messagesWrapper.querySelectorAll('.plan-steps-box').forEach(box => {
+        const msgEl = box.closest('.message');
+        const idx = parseInt(msgEl?.getAttribute('data-index'), 10);
+        box.classList.toggle('plan-box-active', idx === activePlanMsgIndex);
+    });
+}
+
 function openDetailPanelFromSaved(planData) {
     if (!detailPanel) return;
     
@@ -3998,11 +4482,20 @@ function openDetailPanelFromSaved(planData) {
         if (r.step && r.result?.code) {
             detailPanelData.codes[r.step - 1] = {
                 language: r.result.language || 'python',
-                code: r.result.code
+                code: r.result.code,
+                execution: r.result.execution
             };
         }
     });
     currentCodeStep = null;
+
+    // Backfill missing tool field in steps from result entries
+    detailPanelData.steps.forEach((step, i) => {
+        if (!step.tool && detailPanelData.results[i]?.tool) {
+            step.tool = detailPanelData.results[i].tool;
+        }
+    });
+
     detailPanelData.analysis = planData.analysis || '';
     detailPanelData.currentStep = detailPanelData.steps.length;
     
@@ -4020,7 +4513,7 @@ function openDetailPanelFromSaved(planData) {
     if (nodeGraph) {
         let restoredFromState = false;
         if (currentConversationId) {
-            const savedState = localStorage.getItem('graphState-' + currentConversationId);
+            const savedState = localStorage.getItem(_graphStateKey());
             if (savedState) {
                 try {
                     nodeGraph.setState(JSON.parse(savedState));
@@ -4036,7 +4529,7 @@ function openDetailPanelFromSaved(planData) {
                     nodeGraph._relayoutVertical();
                     nodeGraph.fitToView();
                     if (currentConversationId) {
-                        localStorage.setItem('graphState-' + currentConversationId, JSON.stringify(nodeGraph.getState()));
+                        localStorage.setItem(_graphStateKey(), JSON.stringify(nodeGraph.getState()));
                     }
                     nodeGraph._needsLayout = null;
                 }, 100);
@@ -4060,6 +4553,9 @@ function openDetailPanelFromSaved(planData) {
                     nodeGraph.setNodeStatus(`step-${stepNum}`, 'stopped');
                 }
             });
+            nodeGraph.setNodeStatus('analysis-node', 'stopped');
+        } else if (planData.analysis) {
+            nodeGraph.setNodeStatus('analysis-node', 'completed');
         }
         broadcastGraphMessage({ type: 'plan-data', payload: planData });
     }
@@ -4073,8 +4569,8 @@ function openDetailPanelFromSaved(planData) {
         const regenerateBtn = document.getElementById('regeneratePlan');
         if (regenerateBtn) regenerateBtn.style.display = 'inline-flex';
     }
-    renderOutputs();
-    updateCodeStepSelector();
+    try { renderOutputs(); } catch (e) { console.warn('[openDetailPanelFromSaved] renderOutputs error:', e); }
+    try { updateCodeStepSelector(); } catch (e) { console.warn('[openDetailPanelFromSaved] updateCodeStepSelector error:', e); }
     setTimeout(() => loadSavedOutputsForPlanBox(), 200);
 }
 
@@ -4083,7 +4579,7 @@ function openDetailPanelFromSaved(planData) {
 // ============================================
 
 function applyModeToggle() {
-    document.querySelectorAll('.mode-btn').forEach(btn => {
+    document.querySelectorAll('#modeToggle .mode-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.mode === currentMode);
     });
 }
@@ -4107,7 +4603,7 @@ function setupGraphChannel() {
                 if (nodeGraph) {
                     nodeGraph.setState(payload);
                     if (currentConversationId) {
-                        localStorage.setItem('graphState-' + currentConversationId, JSON.stringify(payload));
+                        localStorage.setItem(_graphStateKey(), JSON.stringify(payload));
                     }
                 }
                 break;
@@ -4182,9 +4678,10 @@ async function rerunPlanFromGraph() {
             oldPlanBox.classList.add('plan-box-archived');
         }
 
+        const currentGoal = detailPanelData.goal || executionPlan.goal || '';
         const toolCall = {
             name: 'create_plan',
-            arguments: { goal: executionPlan.goal, steps: executionPlan.steps }
+            arguments: { goal: currentGoal, steps: executionPlan.steps }
         };
         const newPlanBox = createPlanStepsBox(toolCall);
 
@@ -4199,7 +4696,22 @@ async function rerunPlanFromGraph() {
             tool: s.tool || '',
             description: s.description || ''
         }));
-        openDetailPanel({ goal: executionPlan.goal, userMessage: detailPanelData.userMessage || '', steps: planSteps });
+
+        detailPanelData.goal = currentGoal;
+        detailPanelData.userMessage = detailPanelData.userMessage || '';
+        detailPanelData.steps = planSteps;
+        detailPanelData.results = [];
+        detailPanelData.codes = {};
+        detailPanelData.analysis = '';
+        detailPanelData.currentStep = 0;
+        currentCodeStep = null;
+        showDetailPanelUI();
+
+        if (nodeGraph) {
+            for (const [id] of nodeGraph.nodes) {
+                nodeGraph.setNodeStatus(id, 'pending');
+            }
+        }
     } else {
         const planBox = document.getElementById('current-plan-box');
         if (planBox) {
@@ -4214,24 +4726,14 @@ async function rerunPlanFromGraph() {
                 if (toggle) toggle.style.visibility = 'hidden';
             });
         }
+        if (nodeGraph) {
+            for (const [id] of nodeGraph.nodes) {
+                nodeGraph.setNodeStatus(id, 'pending');
+            }
+        }
     }
 
     try {
-        const response = await fetch('/api/replan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                conversation_id: currentConversationId,
-                goal: executionPlan.goal,
-                steps: executionPlan.steps,
-                rerun: true
-            })
-        });
-        if (!response.ok) {
-            console.error('Replan failed:', response.statusText);
-            return;
-        }
-
         isStreaming = true;
         currentAbortController = new AbortController();
         setStreamingUI(true);
@@ -4241,8 +4743,11 @@ async function rerunPlanFromGraph() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 conversation_id: currentConversationId,
-                message: `[RERUN_PLAN] Execute the updated plan.`,
-                mode: currentMode
+                message: '',
+                mode: currentMode,
+                rerun: true,
+                rerun_steps: executionPlan.steps,
+                rerun_goal: detailPanelData.goal || executionPlan.goal || ''
             }),
             signal: currentAbortController.signal
         });
@@ -4284,14 +4789,23 @@ async function rerunPlanFromGraph() {
                     }
 
                     if (data.tool_result) {
-                        updateToolResultBox(data.tool_result);
-                        if (detailPanelOpen && data.tool_result.step !== undefined) {
-                            addToolResultToDetailPanel(data.tool_result.step - 1, data.tool_result);
+                        try {
+                            updateToolResultBox(data.tool_result);
+                        } catch (e) {
+                            console.error('[rerun] updateToolResultBox error:', e);
                         }
                         if (nodeGraph && data.tool_result.step !== undefined) {
-                            const status = data.tool_result.success ? 'completed' : 'error';
+                            const hasMore = data.tool_result.tools_remaining && data.tool_result.tools_remaining > 0;
+                            const status = hasMore ? 'running' : (data.tool_result.success ? 'completed' : 'error');
                             nodeGraph.setNodeStatus(`step-${data.tool_result.step}`, status);
                             broadcastGraphMessage({ type: 'step-update', payload: { step: data.tool_result.step, status } });
+                        }
+                        if (data.tool_result.step !== undefined) {
+                            try {
+                                addToolResultToDetailPanel(data.tool_result.step - 1, data.tool_result);
+                            } catch (e) {
+                                console.error('[rerun] addToolResultToDetailPanel error:', e);
+                            }
                         }
                     }
 
@@ -4304,6 +4818,11 @@ async function rerunPlanFromGraph() {
                             }
                         }
                         if (nodeGraph) {
+                            for (const [id, node] of nodeGraph.nodes) {
+                                if (node.status === 'running' && id !== `step-${data.step_start.step}`) {
+                                    nodeGraph.setNodeStatus(id, 'completed');
+                                }
+                            }
                             nodeGraph.setNodeStatus(`step-${data.step_start.step}`, 'running');
                         }
                         broadcastGraphMessage({ type: 'step-update', payload: { step: data.step_start.step, status: 'running' } });
@@ -4313,7 +4832,14 @@ async function rerunPlanFromGraph() {
                         if (data.plan_complete && planBox) {
                             updatePlanBoxWithResults(planBox, data.plan_complete);
                         }
-                        if (detailPanelOpen && data.plan_complete) {
+                        if (data.plan_complete) {
+                            if (data.plan_complete.results) {
+                                data.plan_complete.results.forEach(r => {
+                                    if (r.step && !detailPanelData.results[r.step - 1]) {
+                                        detailPanelData.results[r.step - 1] = r;
+                                    }
+                                });
+                            }
                             onPlanComplete();
                         }
                     }
@@ -4332,6 +4858,176 @@ async function rerunPlanFromGraph() {
         setStreamingUI(false);
         nodeGraph?.snapshotExecutionPlanHash();
     }
+}
+
+function _looksLikeCode(str) {
+    if (!str || str.split('\n').length < 2) return false;
+    const codePatterns = /^(import |from |def |class |try:|except |for |if |while |return |print\(|#\s|    )/m;
+    return codePatterns.test(str);
+}
+
+function _formatWidgetResult(obj) {
+    if (typeof obj === 'string') {
+        if (_looksLikeCode(obj)) {
+            return '<pre style="margin:0;overflow-x:auto;"><code>' + escapeHtml(obj) + '</code></pre>';
+        }
+        return renderMarkdown(obj);
+    }
+    if (Array.isArray(obj)) {
+        return '<ul>' + obj.map(item => '<li>' + _formatWidgetResult(item) + '</li>').join('') + '</ul>';
+    }
+    if (typeof obj === 'object' && obj !== null) {
+        let html = '';
+        for (const [key, val] of Object.entries(obj)) {
+            const isPlaceholder = /^_+$/.test(key);
+            if (!isPlaceholder) {
+                html += `<div class="ng-node-detail-result-key">${escapeHtml(key)}</div>`;
+            }
+            html += `<div class="ng-node-detail-result-val">${_formatWidgetResult(val)}</div>`;
+        }
+        return html;
+    }
+    return escapeHtml(String(obj));
+}
+
+/**
+ * Close the floating node detail widget
+ */
+function closeNodeDetailWidget() {
+    const existing = document.querySelector('.ng-node-detail-widget');
+    if (existing) existing.remove();
+    const overlay = document.querySelector('.ng-node-detail-overlay');
+    if (overlay) overlay.remove();
+    document.removeEventListener('keydown', _nodeDetailWidgetEscHandler);
+}
+
+function _nodeDetailWidgetEscHandler(e) {
+    if (e.key === 'Escape') closeNodeDetailWidget();
+}
+
+/**
+ * Open a floating widget showing node detail (thought, action, result, etc.)
+ */
+function openNodeDetailWidget(nodeId, node, graphContainer) {
+    closeNodeDetailWidget();
+
+    const stepMatch = nodeId.match(/^step-(\d+)$/);
+    if (!stepMatch) return;
+
+    const stepIndex = parseInt(stepMatch[1]) - 1;
+    const stepDef = detailPanelData.steps[stepIndex];
+    let resultData = detailPanelData.results[stepIndex];
+
+    const widget = document.createElement('div');
+    widget.className = 'ng-node-detail-widget';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'ng-node-detail-header';
+
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'ng-node-detail-header-title';
+    titleSpan.textContent = node.title || stepDef?.name || nodeId;
+
+    const nodeStatus = node.status || 'pending';
+    const statusBadge = document.createElement('span');
+    statusBadge.className = 'ng-node-detail-status';
+    statusBadge.dataset.status = nodeStatus;
+    statusBadge.textContent = t('widget.status_' + nodeStatus) || nodeStatus;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'ng-node-detail-close';
+    closeBtn.innerHTML = '&#x2715;';
+    closeBtn.addEventListener('click', closeNodeDetailWidget);
+
+    header.appendChild(titleSpan);
+    header.appendChild(statusBadge);
+    header.appendChild(closeBtn);
+    widget.appendChild(header);
+
+    // Body
+    const body = document.createElement('div');
+    body.className = 'ng-node-detail-body';
+
+    // Tool info
+    const toolName = stepDef?.tool || node.tool || '';
+    if (toolName) {
+        const sec = document.createElement('div');
+        sec.className = 'ng-node-detail-section';
+        sec.innerHTML = `<div class="ng-node-detail-section-label">${t('widget.tool') || 'Tool'}</div>
+            <div class="ng-node-detail-section-content">${escapeHtml(toolName)}</div>`;
+        body.appendChild(sec);
+    }
+
+    // Description
+    const desc = stepDef?.description || '';
+    if (desc) {
+        const sec = document.createElement('div');
+        sec.className = 'ng-node-detail-section';
+        sec.innerHTML = `<div class="ng-node-detail-section-label">${t('widget.description') || 'Description'}</div>
+            <div class="ng-node-detail-section-content">${escapeHtml(desc)}</div>`;
+        body.appendChild(sec);
+    }
+
+    // Flatten results if array
+    const items = Array.isArray(resultData) ? resultData : (resultData ? [resultData] : []);
+
+    if (items.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'ng-node-detail-empty';
+        empty.textContent = t('widget.no_data') || 'No result data available';
+        body.appendChild(empty);
+    } else {
+        for (const item of items) {
+            // Think
+            if (item.thought) {
+                const sec = document.createElement('div');
+                sec.className = 'ng-node-detail-section';
+                sec.innerHTML = `<div class="ng-node-detail-section-label">${t('widget.think') || 'Think'}</div>
+                    <div class="ng-node-detail-section-content">${renderMarkdown(item.thought)}</div>`;
+                body.appendChild(sec);
+            }
+
+            // Action
+            if (item.action) {
+                const sec = document.createElement('div');
+                sec.className = 'ng-node-detail-section';
+                sec.innerHTML = `<div class="ng-node-detail-section-label">${t('widget.action') || 'Action'}</div>
+                    <div class="ng-node-detail-section-content">${renderMarkdown(item.action)}</div>`;
+                body.appendChild(sec);
+            }
+
+            // Result
+            const resultContent = item.result;
+            if (resultContent) {
+                const sec = document.createElement('div');
+                sec.className = 'ng-node-detail-section';
+                const label = t('widget.result') || 'Result';
+                sec.innerHTML = `<div class="ng-node-detail-section-label">${label}</div>
+                    <div class="ng-node-detail-section-content">${_formatWidgetResult(resultContent)}</div>`;
+                body.appendChild(sec);
+            }
+
+            // Error
+            if (item.error) {
+                const sec = document.createElement('div');
+                sec.className = 'ng-node-detail-section';
+                sec.innerHTML = `<div class="ng-node-detail-section-label">${t('widget.error') || 'Error'}</div>
+                    <div class="ng-node-detail-section-content" style="color: #ef4444;">${escapeHtml(item.error)}</div>`;
+                body.appendChild(sec);
+            }
+        }
+    }
+
+    widget.appendChild(body);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'ng-node-detail-overlay';
+    overlay.addEventListener('click', closeNodeDetailWidget);
+    graphContainer.appendChild(overlay);
+    graphContainer.appendChild(widget);
+
+    document.addEventListener('keydown', _nodeDetailWidgetEscHandler);
 }
 
 /**
@@ -4355,12 +5051,23 @@ function switchDetailTab(tabName) {
         activeContent.classList.add('active');
     }
 
+    if (tabName !== 'graph') {
+        closeNodeDetailWidget();
+    }
+
+    if (tabName === 'code' && detailPanelData.codes && Object.keys(detailPanelData.codes).length > 0) {
+        updateCodeStepSelector();
+    }
+    if (tabName === 'outputs' && detailPanelData.results && detailPanelData.results.length > 0) {
+        renderOutputs();
+    }
+
     if (tabName === 'graph' && typeof nodeGraph !== 'undefined' && nodeGraph) {
         setTimeout(() => {
             if (nodeGraph._needsLayout) {
                 nodeGraph._relayoutVertical();
                 if (currentConversationId) {
-                    localStorage.setItem('graphState-' + currentConversationId, JSON.stringify(nodeGraph.getState()));
+                    localStorage.setItem(_graphStateKey(), JSON.stringify(nodeGraph.getState()));
                 }
             }
             nodeGraph.fitToView();
@@ -4382,12 +5089,12 @@ function setupDetailResize() {
         startX = e.clientX;
         startWidth = detailPanel.offsetWidth;
         detailResizeHandle.classList.add('resizing');
-        // Add resizing class to toggle to disable transition
         if (detailToggle) {
             detailToggle.classList.add('resizing');
         }
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
+        if (nodeGraph) nodeGraph._preserveCenterOnResize = true;
     });
     
     document.addEventListener('mousemove', (e) => {
@@ -4395,14 +5102,52 @@ function setupDetailResize() {
         
         const diff = startX - e.clientX;
         const containerWidth = document.querySelector('.chat-detail-container').clientWidth;
-        const newWidth = Math.max(250, Math.min(startWidth + diff, containerWidth * 0.6));
+        const rawWidth = startWidth + diff;
+        
+        detailPanelManuallyResized = true;
+        if (rawWidth < 300) {
+            const overshoot = 300 - rawWidth;
+            if (overshoot > 200) {
+                isResizing = false;
+                if (nodeGraph) nodeGraph._preserveCenterOnResize = false;
+                detailResizeHandle.classList.remove('resizing');
+                if (detailToggle) {
+                    detailToggle.classList.remove('resizing');
+                    detailToggle.style.right = '';
+                }
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                
+                detailPanel.style.transition = 'width 0.3s ease, opacity 0.25s ease';
+                detailPanel.offsetHeight;
+                detailPanel.style.width = '0px';
+                detailPanel.style.opacity = '0';
+                
+                const onEnd = () => {
+                    detailPanel.removeEventListener('transitionend', onEnd);
+                    detailPanel.style.transition = '';
+                    detailPanel.style.width = '';
+                    detailPanel.style.opacity = '';
+                    closeDetailPanel();
+                };
+                detailPanel.addEventListener('transitionend', onEnd, { once: true });
+                return;
+            }
+            detailPanelWidth = 300;
+            document.documentElement.style.setProperty('--detail-panel-width', '300px');
+            detailPanel.style.width = '300px';
+            if (detailToggle && detailPanelOpen) {
+                detailToggle.style.right = '304px';
+            }
+            return;
+        }
+        
+        const newWidth = Math.min(rawWidth, containerWidth * 0.6);
         
         detailPanelWidth = newWidth;
-        // Update CSS variable on :root for consistent usage
         document.documentElement.style.setProperty('--detail-panel-width', newWidth + 'px');
         detailPanel.style.width = newWidth + 'px';
         
-        // Sync toggle button position (no transition during resize)
         if (detailToggle && detailPanelOpen) {
             detailToggle.style.right = (newWidth + 4) + 'px';
         }
@@ -4411,14 +5156,12 @@ function setupDetailResize() {
     document.addEventListener('mouseup', () => {
         if (isResizing) {
             isResizing = false;
+            if (nodeGraph) nodeGraph._preserveCenterOnResize = false;
             detailResizeHandle.classList.remove('resizing');
-            // Remove resizing class from toggle
             if (detailToggle) {
                 detailToggle.classList.remove('resizing');
-                // Clear inline style, let CSS handle via variable
                 detailToggle.style.right = '';
             }
-            // Clear inline width, let CSS handle via variable
             detailPanel.style.width = '';
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
@@ -4589,16 +5332,16 @@ async function requestCodeGen(stepIndex, force = false) {
             detailPanelData.codes[stepIndex] = data.result;
             renderCode(stepIndex);
         } else {
-            const errMsg = data.error || data.result?.error || 'Code generation failed';
+            const errMsg = data.error || data.result?.error || t('error.code_gen_failed');
             console.error('code_gen failed:', errMsg);
             if (codeContent) {
-                codeContent.innerHTML = `<div class="error">Code generation failed: ${escapeHtml(errMsg)}</div>`;
+                codeContent.innerHTML = `<div class="error">${t('error.code_gen_failed')}: ${escapeHtml(errMsg)}</div>`;
             }
         }
     } catch (error) {
         console.error('code_gen error:', error);
         if (codeContent) {
-            codeContent.innerHTML = `<div class="error">Error: ${escapeHtml(error.message)}</div>`;
+            codeContent.innerHTML = `<div class="error">${t('error.generic', { message: escapeHtml(error.message) })}</div>`;
         }
     } finally {
         if (codeLoading) codeLoading.style.display = 'none';
@@ -4623,7 +5366,7 @@ function updateCodeStepSelector() {
 
     let html = '';
     const allActive = currentCodeStep === 'all' ? ' active' : '';
-    html += `<button class="code-step-btn${allActive}" data-step="all">All</button>`;
+    html += `<button class="code-step-btn${allActive}" data-step="all">${t('label.all')}</button>`;
 
     for (let i = 0; i < detailPanelData.steps.length; i++) {
         if (!detailPanelData.codes[i]) continue;
@@ -4665,7 +5408,7 @@ function renderCode(stepIndex) {
             hasAny = true;
             const step = detailPanelData.steps[i];
             const title = 'Step ' + (i + 1) + ': ' + (step?.tool || '');
-            html += createCodeBlockHTML(cd.code, cd.language, title, i);
+            html += createCodeBlockHTML(cd.code, cd.language, title, i, cd.execution);
         }
         if (!hasAny) {
             codeContent.innerHTML = '<div class="code-empty-state">' + t('empty.no_code') + '</div>';
@@ -4690,7 +5433,7 @@ function renderCode(stepIndex) {
         return;
     }
 
-    codeContent.innerHTML = createCodeBlockHTML(codeData.code, codeData.language, title, stepIndex);
+    codeContent.innerHTML = createCodeBlockHTML(codeData.code, codeData.language, title, stepIndex, codeData.execution);
     attachCodeBlockListeners(codeContent);
     if (codeActions) codeActions.style.display = 'flex';
     currentCodeStep = stepIndex;
@@ -4761,24 +5504,61 @@ function highlightCodeSyntax(code, language) {
 /**
  * Build a code block HTML with header, syntax highlighting, copy/run buttons, and result area.
  */
-function createCodeBlockHTML(code, language, title, stepIndex) {
+function createCodeBlockHTML(code, language, title, stepIndex, execution) {
     const highlighted = highlightCodeSyntax(code, language);
     const id = 'cb-' + Math.random().toString(36).slice(2, 9);
     const stepAttr = stepIndex != null ? ` data-step="${stepIndex}"` : '';
+
+    let statusHtml = '', stdoutHtml = '', figHtml = '', tblHtml = '', stderrHtml = '';
+    let showResult = false;
+    if (execution) {
+        showResult = true;
+        const isSuccess = execution.success !== false;
+        let hasOutput = false;
+
+        if (execution.stdout && execution.stdout.trim()) {
+            stdoutHtml = `<pre class="code-stdout">${escapeHtml(execution.stdout)}</pre>`;
+            hasOutput = true;
+        }
+        if (execution.figures && execution.figures.length) {
+            figHtml = execution.figures.map(f => `<img src="${f}" class="code-result-img">`).join('');
+            hasOutput = true;
+        }
+        if (execution.tables && execution.tables.length) {
+            tblHtml = execution.tables.map(csvUrl =>
+                `<div class="code-result-csv-pending" data-csv-url="${escapeHtml(csvUrl)}"></div>`
+            ).join('');
+            hasOutput = true;
+        }
+        if (execution.stderr && execution.stderr.trim()) {
+            stderrHtml = `<pre class="code-error">${escapeHtml(execution.stderr)}</pre>`;
+            hasOutput = true;
+        }
+
+        if (isSuccess && !hasOutput) {
+            statusHtml = `<div class="code-exec-status success">${t('status.exec_no_output')}</div>`;
+        } else if (!isSuccess && !hasOutput) {
+            statusHtml = `<div class="code-exec-status failure">${t('status.exec_failed')}</div>`;
+        } else if (!isSuccess) {
+            statusHtml = `<div class="code-exec-status failure">${t('status.exec_failed')}</div>`;
+        }
+    }
+
     return `
         <div class="code-block" id="${id}"${stepAttr}>
             <div class="code-block-header">
                 <span class="code-block-title">${escapeHtml(title || '')}</span>
                 <span class="code-block-lang">${escapeHtml(language || 'python')}</span>
-                <button class="code-run-btn" data-target="${id}">Run</button>
-                <button class="code-copy-btn" data-target="${id}">Copy</button>
+                <button class="code-run-btn" data-target="${id}">${t('label.run')}</button>
+                <button class="code-copy-btn" data-target="${id}">${t('label.copy')}</button>
             </div>
             <div class="code-block-body">${highlighted}</div>
-            <div class="code-result" id="${id}-result" style="display:none">
-                <div class="code-result-stdout"></div>
-                <div class="code-result-figures"></div>
-                <div class="code-result-tables"></div>
-                <div class="code-result-stderr"></div>
+            <div class="code-result" id="${id}-result" style="display:${showResult ? 'block' : 'none'}">
+                ${statusHtml}
+                <div class="code-result-stdout">${stdoutHtml}</div>
+                <div class="code-result-figures">${figHtml}</div>
+                <div class="code-result-tables">${tblHtml}</div>
+                <div class="code-result-stderr">${stderrHtml}</div>
             </div>
         </div>`;
 }
@@ -4794,10 +5574,10 @@ function copyCodeBlock(btn) {
     if (!body) return;
     const text = body.textContent || '';
     navigator.clipboard.writeText(text).then(() => {
-        btn.textContent = 'Copied!';
+        btn.textContent = t('label.copied');
         btn.classList.add('copied');
         setTimeout(() => {
-            btn.textContent = 'Copy';
+            btn.textContent = t('label.copy');
             btn.classList.remove('copied');
         }, 2000);
     }).catch(err => console.error('Copy failed:', err));
@@ -4834,12 +5614,12 @@ async function runCodeBlock(btn) {
     const stepIndex = block.dataset.step != null ? parseInt(block.dataset.step) : 0;
 
     btn.disabled = true;
-    btn.textContent = 'Running...';
+    btn.textContent = t('label.running');
 
     const resultDiv = block.querySelector('.code-result');
     if (resultDiv) {
         resultDiv.style.display = 'block';
-        resultDiv.querySelector('.code-result-stdout').innerHTML = '<div class="code-running">Executing...</div>';
+        resultDiv.querySelector('.code-result-stdout').innerHTML = `<div class="code-running">${t('status.executing_code')}</div>`;
         resultDiv.querySelector('.code-result-figures').innerHTML = '';
         resultDiv.querySelector('.code-result-tables').innerHTML = '';
         resultDiv.querySelector('.code-result-stderr').innerHTML = '';
@@ -4861,7 +5641,7 @@ async function runCodeBlock(btn) {
         }
     } finally {
         btn.disabled = false;
-        btn.textContent = 'Run';
+        btn.textContent = t('label.run');
     }
 }
 
@@ -4871,12 +5651,17 @@ function displayCodeResult(resultDiv, data) {
     const tblEl = resultDiv.querySelector('.code-result-tables');
     const stderrEl = resultDiv.querySelector('.code-result-stderr');
 
+    // Remove any previous status indicator
+    const prevStatus = resultDiv.querySelector('.code-exec-status');
+    if (prevStatus) prevStatus.remove();
+
     stdoutEl.innerHTML = '';
     figEl.innerHTML = '';
     tblEl.innerHTML = '';
     stderrEl.innerHTML = '';
 
     let hasContent = false;
+    const isSuccess = data.success !== false;
 
     if (data.stdout && data.stdout.trim()) {
         stdoutEl.innerHTML = `<pre class="code-stdout">${escapeHtml(data.stdout)}</pre>`;
@@ -4895,7 +5680,21 @@ function displayCodeResult(resultDiv, data) {
         hasContent = true;
     }
 
-    resultDiv.style.display = hasContent ? 'block' : 'none';
+    if (!hasContent) {
+        const cls = isSuccess ? 'success' : 'failure';
+        const msg = isSuccess ? t('status.exec_no_output') : t('status.exec_failed');
+        const statusEl = document.createElement('div');
+        statusEl.className = `code-exec-status ${cls}`;
+        statusEl.textContent = msg;
+        resultDiv.insertBefore(statusEl, resultDiv.firstChild);
+    } else if (!isSuccess) {
+        const statusEl = document.createElement('div');
+        statusEl.className = 'code-exec-status failure';
+        statusEl.textContent = t('status.exec_failed');
+        resultDiv.insertBefore(statusEl, resultDiv.firstChild);
+    }
+
+    resultDiv.style.display = 'block';
 }
 
 async function loadCsvTable(csvUrl, container) {
@@ -5011,14 +5810,14 @@ async function copyCurrentCode() {
             copyBtn.classList.add('copied');
             copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="20 6 9 17 4 12"/>
-            </svg> Copied!`;
+            </svg> ${t('label.copied')}`;
             
             setTimeout(() => {
                 copyBtn.classList.remove('copied');
                 copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                </svg> Copy`;
+                </svg> ${t('label.copy')}`;
             }, 2000);
         }
     } catch (err) {
@@ -5042,8 +5841,14 @@ function renderOutputs() {
     
     for (let i = 0; i < detailPanelData.results.length; i++) {
         const result = detailPanelData.results[i];
+        if (!result) continue;
+
+        const effective = Array.isArray(result)
+            ? (result.slice().reverse().find(r => r.success !== false) || result[result.length - 1])
+            : result;
+
         const step = detailPanelData.steps[i];
-        const toolResult = result.result || result;
+        const toolResult = effective.result || effective;
         
         html += `
             <div class="output-step-section" id="step-output-${i}">
@@ -5053,69 +5858,120 @@ function renderOutputs() {
                     <span class="output-step-tool">${escapeHtml(step?.tool || '')}</span>
                 </div>
                 <div class="output-content">
-                    ${renderToolResultDetail(toolResult)}
+                    ${renderToolResultDetail(toolResult, i)}
                 </div>
             </div>
         `;
     }
     
     outputsContent.innerHTML = html;
+    attachCodeBlockListeners(outputsContent);
+    loadAllSavedResults(outputsContent);
+
+    outputsContent.querySelectorAll('.code-result-csv-pending').forEach(el => {
+        const csvUrl = el.dataset.csvUrl;
+        if (csvUrl) loadCsvTable(csvUrl, el.parentElement);
+        el.remove();
+    });
+
+    outputsContent.querySelectorAll('.code-block[data-step]').forEach(block => {
+        const stepIndex = parseInt(block.dataset.step);
+        const resultDiv = block.querySelector('.code-result');
+        if (!resultDiv) return;
+        const hasContent = resultDiv.querySelector('.code-stdout, .code-error, .code-result-img, table');
+        if (hasContent) return;
+        const body = block.querySelector('.code-block-body');
+        if (!body) return;
+        const code = body.textContent || '';
+        const lang = block.querySelector('.code-block-lang')?.textContent || 'python';
+        if (code.trim()) {
+            autoExecuteCode(stepIndex, code, lang, resultDiv.id);
+        }
+    });
 }
 
 /**
- * Render detailed tool result for Outputs tab
+ * Render detailed tool result for Outputs tab.
+ * Shows actual code with syntax highlighting, execution results, and markdown-rendered content.
  */
-function renderToolResultDetail(result) {
+function renderToolResultDetail(result, stepIdx) {
     if (!result) return '<div class="error">' + t('error.no_result') + '</div>';
-    
-    let html = '';
-    
-    // Title
-    if (result.title) {
-        html += `<div class="output-title">${escapeHtml(result.title)}</div>`;
+
+    if (typeof result === 'string') {
+        return `<div class="output-text">${renderMarkdown(result)}</div>`;
     }
-    
-    // Details list
-    if (result.details && Array.isArray(result.details)) {
+
+    let html = '';
+    const inner = result.result || result;
+
+    if (inner.title) {
+        html += `<div class="output-title">${renderMarkdown(inner.title)}</div>`;
+    }
+
+    if (inner.details && Array.isArray(inner.details)) {
         html += '<ul class="output-details">';
-        result.details.forEach(detail => {
-            html += `<li>${escapeHtml(String(detail))}</li>`;
-        });
+        inner.details.forEach(d => { html += `<li>${renderMarkdown(String(d))}</li>`; });
         html += '</ul>';
     }
-    
-    // Table data (gene_table, paper_list, efficiency_data)
-    if (result.gene_table && Array.isArray(result.gene_table)) {
-        html += renderOutputTable(['Gene', 'Function', 'Location'], result.gene_table, ['gene', 'function', 'location']);
+
+    if (inner.has_graph) {
+        if (inner.graph_type === 'efficiency') {
+            html += createEfficiencyChart(inner);
+        } else if (inner.graph_type === 'timeline') {
+            html += createTimelineChart(inner);
+        }
     }
-    
-    if (result.paper_list && Array.isArray(result.paper_list)) {
-        html += renderOutputTable(['Title', 'Authors', 'Year'], result.paper_list.slice(0, 10), ['title', 'authors', 'year']);
+
+    if (inner.code) {
+        html += createCodeBlockHTML(inner.code, inner.language || 'python', '', stepIdx != null ? stepIdx : null, inner.execution);
     }
-    
-    if (result.efficiency_data && Array.isArray(result.efficiency_data)) {
-        html += renderOutputTable(['Gene', 'Score'], result.efficiency_data.slice(0, 10), ['gene', 'score']);
+
+    if (inner.gene_table && Array.isArray(inner.gene_table)) {
+        html += renderOutputTable(['Gene', 'Function', 'Location'], inner.gene_table, ['gene', 'function', 'location']);
     }
-    
-    // Summary
-    if (result.summary) {
-        html += `<div class="output-summary">${escapeHtml(result.summary)}</div>`;
+    if (inner.paper_list && Array.isArray(inner.paper_list)) {
+        html += renderOutputTable(['Title', 'Authors', 'Year'], inner.paper_list.slice(0, 10), ['title', 'authors', 'year']);
     }
-    
-    // Meta info (duration, tokens)
+    if (inner.efficiency_data && Array.isArray(inner.efficiency_data)) {
+        html += renderOutputTable(['Gene', 'Score'], inner.efficiency_data.slice(0, 10), ['gene', 'score']);
+    }
+
+    if (inner.summary) {
+        const summaryText = Array.isArray(inner.summary) ? inner.summary.join('\n') : inner.summary;
+        html += `<div class="output-summary">${renderMarkdown(summaryText)}</div>`;
+    }
+
+    if (inner.error) {
+        html += `<div class="output-error">${escapeHtml(inner.error)}</div>`;
+    }
+
+    if (!html && inner.content) {
+        html += `<div class="output-text">${renderMarkdown(String(inner.content))}</div>`;
+    }
+
     const meta = [];
-    if (result.duration) meta.push(`${result.duration}s`);
-    if (result.tokens) meta.push(`${result.tokens} tokens`);
-    
+    if (inner.duration) meta.push(`${inner.duration}s`);
+    if (inner.tokens) meta.push(`${inner.tokens} tokens`);
     if (meta.length > 0) {
         html += `<div class="output-meta">${meta.join(' | ')}</div>`;
     }
-    
-    // Fallback to JSON if nothing else
+
     if (!html) {
-        html = `<pre class="result-json">${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
+        const displayKeys = Object.keys(result).filter(k =>
+            !['step', 'success', 'tool', 'stopped'].includes(k) && result[k] != null
+        );
+        if (displayKeys.length > 0) {
+            html = displayKeys.map(k => {
+                const val = result[k];
+                return `<div class="output-field"><strong>${escapeHtml(k)}</strong>: ${
+                    typeof val === 'string' ? renderMarkdown(val) : escapeHtml(JSON.stringify(val, null, 2))
+                }</div>`;
+            }).join('');
+        } else {
+            html = `<pre class="result-json">${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
+        }
     }
-    
+
     return html;
 }
 
@@ -5160,7 +6016,8 @@ function addToolResultToDetailPanel(stepIndex, result) {
     if (result.result?.code) {
         detailPanelData.codes[stepIndex] = {
             language: result.result.language || 'python',
-            code: result.result.code
+            code: result.result.code,
+            execution: result.result.execution
         };
     }
 
@@ -5169,20 +6026,55 @@ function addToolResultToDetailPanel(stepIndex, result) {
 }
 
 /**
- * Handle plan completion
+ * Handle plan completion: show analyzing state in plan box and trigger analysis
  */
 async function onPlanComplete() {
-    requestAnalyzePlan(true);
+    // Add "Analyzing..." row to plan box
+    const planBox = document.getElementById('current-plan-box');
+    if (planBox && !planBox.querySelector('.plan-analyzing-row')) {
+        const row = document.createElement('div');
+        row.className = 'plan-analyzing-row';
+        row.innerHTML = `<span class="analyzing-spinner"></span><span>${t('status.analyzing_results')}</span>`;
+        planBox.appendChild(row);
+        scrollToBottom();
+    }
+
+    // Highlight the Analysis Plan tab while analyzing
+    const planTab = document.querySelector('.detail-tab[data-tab="plan"]');
+    if (planTab) planTab.classList.add('tab-analyzing');
+
+    // Update graph analysis node to running
+    if (nodeGraph) {
+        nodeGraph.setNodeStatus('analysis-node', 'running');
+    }
+    broadcastGraphMessage({ type: 'step-update', payload: { step: 'analysis-node', status: 'running' } });
+
+    await requestAnalyzePlan(true);
+
+    // Update graph analysis node to completed
+    if (nodeGraph) {
+        nodeGraph.setNodeStatus('analysis-node', 'completed');
+    }
+    broadcastGraphMessage({ type: 'step-update', payload: { step: 'analysis-node', status: 'completed' } });
+
+    // Update plan box row to completed state
+    const analyzingRow = planBox?.querySelector('.plan-analyzing-row');
+    if (analyzingRow) {
+        analyzingRow.classList.add('plan-analyzing-done');
+        analyzingRow.innerHTML = `<span class="analyzing-check">✓</span><span>${t('status.analysis_complete') || 'Analysis Complete'}</span>`;
+    }
+    if (planTab) planTab.classList.remove('tab-analyzing');
 }
 
 /**
  * Scroll to step in Outputs tab
  */
 function scrollToStepOutput(stepIndex) {
-    // Switch to Outputs tab
+    if (!detailPanelOpen) {
+        showDetailPanelUI();
+    }
     switchDetailTab('outputs');
     
-    // Scroll to the step section
     setTimeout(() => {
         const stepEl = document.getElementById(`step-output-${stepIndex}`);
         if (stepEl) {

@@ -2,6 +2,13 @@
 // Node Graph Engine - Unity VFX Style
 // ============================================
 
+function resolveI18n(field) {
+    if (!field) return null;
+    if (typeof field === 'string') return field;
+    const lang = getCurrentLanguage();
+    return field[lang] || field.en || null;
+}
+
 class NodeGraph {
     constructor(container) {
         this.container = container;
@@ -69,6 +76,21 @@ class NodeGraph {
 
         this._setupEvents();
         this._applyTransform();
+
+        this._preserveCenterOnResize = false;
+        this._lastContainerWidth = this.container.clientWidth;
+        this._resizeObserver = new ResizeObserver(entries => {
+            for (const entry of entries) {
+                const newWidth = entry.contentRect.width;
+                if (this._preserveCenterOnResize && this._lastContainerWidth && newWidth !== this._lastContainerWidth) {
+                    const delta = newWidth - this._lastContainerWidth;
+                    this.panX += delta / 2;
+                    this._applyTransform();
+                }
+                this._lastContainerWidth = newWidth;
+            }
+        });
+        this._resizeObserver.observe(this.container);
     }
 
     // ---- Port Helpers ----
@@ -352,6 +374,9 @@ class NodeGraph {
             if (this._contextMenu && this._contextMenu.contains(e.target)) {
                 return;
             }
+            if (e.target.closest('.ng-node-detail-widget') || e.target.closest('.ng-node-detail-overlay')) {
+                return;
+            }
             e.preventDefault();
             if (this._contextMenu) this._closeCreateMenu();
             const rect = this.container.getBoundingClientRect();
@@ -568,6 +593,14 @@ class NodeGraph {
                 this._startTitleEdit(node.id, titleEl);
             });
         }
+
+        el.addEventListener('dblclick', e => {
+            if (e.target.closest('.ng-interactive') || e.target.closest('.ng-node-title')) return;
+            e.stopPropagation();
+            this.container.dispatchEvent(new CustomEvent('node-detail-popup', {
+                detail: { nodeId: node.id, node }
+            }));
+        });
 
         this._addResizeHandles(el, node);
 
@@ -1534,11 +1567,26 @@ class NodeGraph {
             currentY += estimatedNodeHeight + edgeGap;
         }
 
+        const analysisNodeId = this.addNode({
+            id: 'analysis-node',
+            type: 'analyze',
+            title: 'Analysis',
+            tool: 'analyze_plan',
+            x: startX,
+            y: currentY,
+            status: 'pending'
+        });
+
         if (nodeIds.length > 0) {
             this.addConnection(promptNodeId, 'out', nodeIds[0], 'in');
         }
         for (let i = 0; i < nodeIds.length - 1; i++) {
             this.addConnection(nodeIds[i], 'out', nodeIds[i + 1], 'in');
+        }
+        if (nodeIds.length > 0) {
+            this.addConnection(nodeIds[nodeIds.length - 1], 'out', analysisNodeId, 'in');
+        } else {
+            this.addConnection(promptNodeId, 'out', analysisNodeId, 'in');
         }
 
         this.snapshotExecutionPlanHash();
@@ -1626,6 +1674,7 @@ class NodeGraph {
         const candidateIds = new Set();
         for (const node of this.nodes.values()) {
             if (!connectedIds.has(node.id)) continue;
+            if (node.id === 'analysis-node') continue;
             const def = NodeRegistry.get(node.type);
             if (def?.dataOnly) continue;
             if (excludeResult && def?.result) continue;
@@ -1642,6 +1691,16 @@ class NodeGraph {
             inDegree.set(id, filteredParents.get(id).length);
         }
 
+        const depthCache = new Map();
+        function _maxDescendantDepth(nodeId) {
+            if (depthCache.has(nodeId)) return depthCache.get(nodeId);
+            const kids = filteredChildren.get(nodeId) || [];
+            if (kids.length === 0) { depthCache.set(nodeId, 0); return 0; }
+            const d = 1 + Math.max(...kids.map(c => _maxDescendantDepth(c)));
+            depthCache.set(nodeId, d);
+            return d;
+        }
+
         const queue = [];
         for (const [id, deg] of inDegree) {
             if (deg === 0) queue.push(id);
@@ -1649,6 +1708,9 @@ class NodeGraph {
 
         const sorted = [];
         while (queue.length > 0) {
+            if (queue.length > 1) {
+                queue.sort((a, b) => _maxDescendantDepth(b) - _maxDescendantDepth(a));
+            }
             const id = queue.shift();
             sorted.push(id);
             for (const childId of (filteredChildren.get(id) || [])) {
@@ -1776,9 +1838,34 @@ class NodeGraph {
     }
 
     zoomReset() {
-        this.scale = 1;
-        this.panX = 0;
-        this.panY = 0;
+        if (this.nodes.size === 0) {
+            this.scale = 1;
+            this.panX = 0;
+            this.panY = 0;
+            this._applyTransform();
+            return;
+        }
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const node of this.nodes.values()) {
+            const el = this.canvas.querySelector(`[data-node-id="${node.id}"].ng-node`);
+            const w = el ? el.offsetWidth : (node.w || 180);
+            const h = el ? el.offsetHeight : (node.h || 80);
+            minX = Math.min(minX, node.x);
+            minY = Math.min(minY, node.y);
+            maxX = Math.max(maxX, node.x + w);
+            maxY = Math.max(maxY, node.y + h);
+        }
+        const padding = 60;
+        const bw = maxX - minX + padding * 2;
+        const bh = maxY - minY + padding * 2;
+        const cw = this.container.clientWidth;
+        const ch = this.container.clientHeight;
+        this.scale = Math.min(cw / bw, ch / bh, 1);
+        this.scale = Math.max(this.scale, this.minScale);
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        this.panX = cw / 2 - cx * this.scale;
+        this.panY = ch / 2 - cy * this.scale;
         this._applyTransform();
     }
 
@@ -1870,7 +1957,7 @@ class NodeGraph {
         const searchInput = document.createElement('input');
         searchInput.type = 'text';
         searchInput.className = 'ng-create-menu-search';
-        searchInput.placeholder = 'Search...';
+        searchInput.placeholder = t('placeholder.search_node');
         searchInput.addEventListener('input', () => this._filterCreateMenu(searchInput.value));
         searchInput.addEventListener('keydown', e => e.stopPropagation());
         searchWrap.appendChild(searchIcon);
@@ -1878,7 +1965,7 @@ class NodeGraph {
 
         const title = document.createElement('div');
         title.className = 'ng-create-menu-title';
-        title.textContent = 'Create Node';
+        title.textContent = t('label.create_node');
 
         const list = document.createElement('div');
         list.className = 'ng-create-menu-list';
@@ -1907,9 +1994,24 @@ class NodeGraph {
             for (const entry of categories[catName]) {
                 const item = document.createElement('div');
                 item.className = 'ng-create-menu-item';
-                item.textContent = entry.label;
                 item.dataset.nodeType = entry.type;
+
+                const nameEl = document.createElement('div');
+                nameEl.className = 'ng-create-menu-item-name';
+                nameEl.textContent = entry.label;
+                item.appendChild(nameEl);
+
+                const tag = resolveI18n(entry.definition?.defaultConfig?.menuTag);
+                if (tag) {
+                    const descEl = document.createElement('div');
+                    descEl.className = 'ng-create-menu-item-desc';
+                    descEl.textContent = tag;
+                    item.appendChild(descEl);
+                }
+
                 item.addEventListener('click', () => this._onNodeTypeSelected(entry.type));
+                item.addEventListener('mouseenter', (e) => this._showNodePreview(entry, e));
+                item.addEventListener('mouseleave', () => this._hideNodePreview());
                 catItems.appendChild(item);
             }
 
@@ -1947,6 +2049,7 @@ class NodeGraph {
     }
 
     _closeCreateMenu() {
+        this._hideNodePreview();
         if (this._contextMenu) {
             this._contextMenu.remove();
             this._contextMenu = null;
@@ -1984,6 +2087,68 @@ class NodeGraph {
         this.addNode({ type, x, y });
         this._closeCreateMenu();
         this._dispatchChange();
+    }
+
+    // ---- Node Preview Popup ----
+
+    _showNodePreview(entry, event) {
+        this._hideNodePreview();
+
+        const def = NodeRegistry.get(entry.type);
+        if (!def) return;
+
+        const preview = document.createElement('div');
+        preview.className = 'ng-node-preview-popup';
+
+        const desc = resolveI18n(def.defaultConfig?.description);
+        if (desc) {
+            const descEl = document.createElement('div');
+            descEl.className = 'ng-node-preview-desc';
+            descEl.textContent = desc;
+            preview.appendChild(descEl);
+        }
+
+        const previewNode = {
+            id: 'preview', type: entry.type,
+            title: def.label || entry.type,
+            ...(def.defaultConfig || {}),
+            x: 0, y: 0, w: 180, h: 80
+        };
+
+        try {
+            const helpers = { escapeHtml: str => this._escapeHtml(str) };
+            const rendered = def.render(previewNode, helpers);
+            const nodeEl = document.createElement('div');
+            nodeEl.className = 'ng-node ng-status-' + (previewNode.status || 'pending');
+            nodeEl.appendChild(rendered);
+            const nodeWrap = document.createElement('div');
+            nodeWrap.className = 'ng-node-preview-render';
+            nodeWrap.appendChild(nodeEl);
+            preview.appendChild(nodeWrap);
+        } catch (_) { /* skip render errors */ }
+
+        const menuRect = this._contextMenu?.getBoundingClientRect();
+        if (menuRect) {
+            const spaceRight = window.innerWidth - menuRect.right;
+            if (spaceRight >= 240) {
+                preview.style.left = (menuRect.right + 8) + 'px';
+            } else {
+                preview.style.left = (menuRect.left - 240) + 'px';
+            }
+            const itemRect = event.currentTarget.getBoundingClientRect();
+            let top = itemRect.top - 10;
+            preview.style.top = Math.max(8, top) + 'px';
+        }
+
+        document.body.appendChild(preview);
+        this._nodePreview = preview;
+    }
+
+    _hideNodePreview() {
+        if (this._nodePreview) {
+            this._nodePreview.remove();
+            this._nodePreview = null;
+        }
     }
 
     // ---- Inline Title Editing ----

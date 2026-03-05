@@ -618,6 +618,17 @@ def _build_ref_context(step):
     return "\n".join(parts)
 
 
+def _collect_file_refs(step):
+    """Extract file paths from step references for code_gen file reading."""
+    paths = []
+    for ref in step.get('references', []):
+        if ref.get('nodeType') == 'data':
+            pv = ref.get('portValues', {}).get('out') or {}
+            if pv.get('uploadId'):
+                paths.append(f'/uploads/{pv["uploadId"]}')
+    return paths
+
+
 def _collect_step_images(step):
     """Collect PIL Images from step's flow-connected image inputs.
     
@@ -1413,17 +1424,47 @@ def _execute_code_subprocess(code, language, conv_id, step_index):
         ext = '.py'
         cmd_prefix = [sys.executable]
         preamble = (
+            "import os as _os\n"
+            "import json as _json\n"
             "import matplotlib as _mpl\n"
             "_mpl.use('Agg')\n"
             "import matplotlib.pyplot as _plt\n"
             f"_out_dir = {repr(out_dir)}\n"
+            f"_data_dir = {repr(out_dir)}\n"
             "_fig_count = [0]\n"
+            "# Load previous step results if available\n"
+            "results = {}\n"
+            "_prev_path = _os.path.join(_out_dir, '_prev_data.json')\n"
+            "if _os.path.isfile(_prev_path):\n"
+            "    try:\n"
+            "        with open(_prev_path, 'r', encoding='utf-8') as _pf:\n"
+            "            _prev_list = _json.load(_pf)\n"
+            "        for _item in _prev_list:\n"
+            "            _sn = _item.get('step_num', _item.get('step', 0))\n"
+            "            results[_sn] = _item.get('result', {}).get('result', _item.get('result', {}))\n"
+            "    except Exception:\n"
+            "        pass\n"
+            "# Patch plt.show to auto-save figures\n"
             "_orig_show = _plt.show\n"
             "def _patched_show(*a, **kw):\n"
             "    _fig_count[0] += 1\n"
             "    _plt.savefig(f'{_out_dir}/fig_{_fig_count[0]}.png', dpi=100, bbox_inches='tight')\n"
             "    _plt.close('all')\n"
             "_plt.show = _patched_show\n"
+            "# Patch plt.savefig to also copy to _out_dir\n"
+            "_orig_savefig = _plt.savefig\n"
+            "def _patched_savefig(fname, *a, **kw):\n"
+            "    _orig_savefig(fname, *a, **kw)\n"
+            "    if isinstance(fname, str) and not _os.path.isabs(fname):\n"
+            "        _fig_count[0] += 1\n"
+            "        dest = f'{_out_dir}/fig_{_fig_count[0]}.png'\n"
+            "        if _os.path.abspath(fname) != _os.path.abspath(dest):\n"
+            "            try:\n"
+            "                import shutil as _shutil\n"
+            "                _shutil.copy2(_os.path.abspath(fname), dest)\n"
+            "            except Exception:\n"
+            "                pass\n"
+            "_plt.savefig = _patched_savefig\n"
         )
         postamble = (
             "\n# --- auto-save cleanup ---\n"
@@ -1443,6 +1484,12 @@ def _execute_code_subprocess(code, language, conv_id, step_index):
             "    pass\n"
         )
 
+    if language == 'python':
+        has_main_def = bool(re.search(r'^def\s+main\s*\(', code, re.MULTILINE))
+        has_main_call = bool(re.search(r'(?:^|\n)(?:if\s+__name__.*)?main\s*\(', code))
+        if has_main_def and not has_main_call:
+            code += '\n\nmain()\n'
+
     full_code = preamble + code + postamble
     tmp_file = None
     try:
@@ -1459,6 +1506,10 @@ def _execute_code_subprocess(code, language, conv_id, step_index):
         stdout = proc.stdout or ''
         stderr = proc.stderr or ''
         success = proc.returncode == 0
+        print(f"[exec] returncode={proc.returncode}, stdout={len(stdout)} chars, stderr={len(stderr)} chars")
+        print(f"[exec] cwd={out_dir}")
+        if stderr.strip():
+            print(f"[exec] stderr preview: {stderr[:300]}")
     except subprocess.TimeoutExpired:
         stdout = ''
         stderr = 'Code execution timed out (60s limit)'
@@ -1474,12 +1525,16 @@ def _execute_code_subprocess(code, language, conv_id, step_index):
     figures = []
     tables = []
     if os.path.isdir(out_dir):
-        for f in sorted(os.listdir(out_dir)):
+        all_files = sorted(os.listdir(out_dir))
+        for f in all_files:
+            if f.startswith('_'):
+                continue
             url = f'/api/outputs/{conv_id}/step_{step_index}/{f}'
             if f.endswith('.png'):
                 figures.append(url)
             elif f.endswith('.csv'):
                 tables.append(url)
+        print(f"[exec] output files: {[f for f in all_files if not f.startswith('_')]}, figures={len(figures)}, tables={len(tables)}")
 
     return {
         'success': success,
@@ -1846,7 +1901,34 @@ class InferenceChatHandler(BaseHTTPRequestHandler):
             self.send_json({'files': helpers + nodes})
         
         elif path == '/api/model':
-            self.send_json({'model': global_model_name})
+            from utils.api_chat import get_active_model
+            active = get_active_model()
+            self.send_json({
+                'model': global_model_name or active.get('local_model', ''),
+                'mode': active.get('mode', 'local'),
+                'provider': active.get('api_provider', ''),
+                'api_model': active.get('api_model', '')
+            })
+        
+        elif path == '/api/models':
+            from utils.api_chat import get_active_model, get_provider_models
+            active = get_active_model()
+            local_models = list_available_models()
+            api_models = get_provider_models()
+            self.send_json({
+                'local': local_models,
+                'api': api_models,
+                'active': {
+                    'mode': active.get('mode', 'local'),
+                    'local_model': active.get('local_model', global_model_name or ''),
+                    'api_provider': active.get('api_provider', ''),
+                    'api_model': active.get('api_model', '')
+                }
+            })
+        
+        elif path == '/api/api-keys':
+            from utils.api_chat import get_api_keys_status
+            self.send_json(get_api_keys_status())
         
         elif path == '/api/conversations':
             conversations = conversation_manager.list_conversations()
@@ -1862,6 +1944,23 @@ class InferenceChatHandler(BaseHTTPRequestHandler):
         
         elif path == '/api/system_prompt':
             self.send_json({'system_prompt': global_system_prompt or ''})
+        
+        elif path == '/api/system_prompt/default':
+            default_prompt = DEFAULT_SYSTEM_PROMPT
+            file_config = get_file_config(global_args.model_type) if global_args else None
+            sp_file = file_config.SYSTEM_PROMPT if file_config and hasattr(file_config, 'SYSTEM_PROMPT') else "SYSTEM_PROMPT.txt"
+            if file_config and hasattr(file_config, 'BASE_PATH'):
+                sp_path = os.path.join(file_config.BASE_PATH, sp_file)
+                if os.path.exists(sp_path):
+                    with open(sp_path, "r", encoding="utf-8") as f:
+                        default_prompt = f.read().strip()
+            model_path = getattr(global_args, 'model_path', None)
+            if model_path:
+                sp_path = os.path.join(model_path, sp_file)
+                if os.path.exists(sp_path):
+                    with open(sp_path, "r", encoding="utf-8") as f:
+                        default_prompt = f.read().strip()
+            self.send_json({'system_prompt': default_prompt})
         
         elif path == '/api/settings':
             self.send_json({
@@ -1920,6 +2019,7 @@ class InferenceChatHandler(BaseHTTPRequestHandler):
             self.send_error(404, 'Not found')
     
     def do_POST(self):
+        global global_system_prompt, global_args, global_stop_generation
         parsed = urlparse(self.path)
         path = parsed.path
         
@@ -1962,13 +2062,37 @@ class InferenceChatHandler(BaseHTTPRequestHandler):
                 self.send_error_json('Failed to truncate', 400)
         
         elif path == '/api/system_prompt':
-            global global_system_prompt
-            new_prompt = data.get('system_prompt', '')
-            global_system_prompt = new_prompt
-            self.send_json({'success': True})
+            is_reset = data.get('reset', False)
+            prompts_dir = os.path.join(os.path.dirname(__file__), "prompts")
+            sp_path = os.path.join(prompts_dir, "SYSTEM_PROMPT.txt")
+            
+            if is_reset:
+                # Delete custom file so model default is used on next restart
+                try:
+                    if os.path.exists(sp_path):
+                        os.remove(sp_path)
+                        print(f"[system_prompt] Deleted custom prompt file, reverting to model default")
+                except Exception as e:
+                    print(f"[Warning] Failed to delete custom prompt file: {e}")
+                # Reload default from model directory
+                global_system_prompt = load_system_prompt(
+                    getattr(global_args, 'model_path', ''),
+                    getattr(global_args, 'model_type', 'ministral_3_3b_instruct')
+                )
+            else:
+                new_prompt = data.get('system_prompt', '')
+                global_system_prompt = new_prompt
+                os.makedirs(prompts_dir, exist_ok=True)
+                try:
+                    with open(sp_path, "w", encoding="utf-8") as f:
+                        f.write(new_prompt)
+                    print(f"[system_prompt] Saved custom prompt ({len(new_prompt)} chars)")
+                except Exception as e:
+                    print(f"[Warning] Failed to persist system prompt: {e}")
+            
+            self.send_json({'success': True, 'system_prompt': global_system_prompt})
         
         elif path == '/api/settings':
-            global global_args
             if 'temperature' in data:
                 global_args.temperature = float(data['temperature'])
             if 'max_length' in data:
@@ -1981,8 +2105,40 @@ class InferenceChatHandler(BaseHTTPRequestHandler):
                 global_args.max_context = min(max(max_ctx, 1024), 262144)
             self.send_json({'success': True})
         
+        elif path == '/api/model/switch':
+            from utils.api_chat import save_active_model, get_active_model
+            req_mode = data.get('mode', 'local')
+            req_model = data.get('model_name', '')
+            req_provider = data.get('provider', '')
+            current_active = get_active_model()
+            if req_mode == 'local':
+                save_active_model(
+                    mode='local',
+                    local_model=req_model or global_model_name or '',
+                    api_provider=current_active.get('api_provider', ''),
+                    api_model=current_active.get('api_model', '')
+                )
+            else:
+                save_active_model(
+                    mode='api',
+                    local_model=current_active.get('local_model', global_model_name or ''),
+                    api_provider=req_provider,
+                    api_model=req_model
+                )
+            updated = get_active_model()
+            self.send_json({'success': True, 'active': updated})
+        
+        elif path == '/api/api-keys':
+            from utils.api_chat import save_api_key, get_api_keys_status
+            provider = data.get('provider', '')
+            api_key = data.get('api_key', '')
+            if not provider:
+                self.send_error_json('Missing provider', 400)
+            else:
+                save_api_key(provider, api_key)
+                self.send_json({'success': True, 'keys': get_api_keys_status()})
+        
         elif path == '/api/stop':
-            global global_stop_generation
             global_stop_generation = True
             self.send_json({'success': True})
         
@@ -2408,8 +2564,11 @@ Select and execute the appropriate tool."""
         conv_id = data.get('conversation_id')
         message = data.get('message', '').strip()
         files = data.get('files', [])
+        is_rerun = data.get('rerun', False)
+        rerun_steps = data.get('rerun_steps', [])
+        rerun_goal = data.get('rerun_goal', '')
         
-        if not conv_id or (not message and not files):
+        if not conv_id or (not message and not files and not is_rerun):
             self.send_error_json('Missing conversation_id or message')
             return
         
@@ -2472,8 +2631,9 @@ Select and execute the appropriate tool."""
             file_header = ' '.join(file_descriptions)
             full_message = file_header + ('\n' + full_message if full_message else '')
         
-        # Add user message (with file references)
-        conversation_manager.add_message(conv_id, 'user', full_message, files=processed_files)
+        # Skip saving user message for rerun (no actual user message)
+        if not is_rerun:
+            conversation_manager.add_message(conv_id, 'user', full_message, files=processed_files)
         
         # Send SSE headers
         self.send_response(200)
@@ -2487,6 +2647,71 @@ Select and execute the appropriate tool."""
         full_response = ""
         response_saved = False
         
+        # Check if we should use API mode
+        from utils.api_chat import get_active_model as _get_active
+        _active_cfg = _get_active()
+        _use_api_mode = (
+            _active_cfg.get('mode') == 'api'
+            and _active_cfg.get('api_provider')
+            and _active_cfg.get('api_model')
+        )
+        
+        if _use_api_mode and not is_rerun:
+            # --- API Model Path (not used for rerun - rerun requires tool execution) ---
+            try:
+                from utils.api_chat import stream_chat
+                conv = conversation_manager.get_conversation(conv_id)
+                history = []
+                for msg in conv.get('messages', [])[:-1]:
+                    history.append({'role': msg['role'], 'content': msg['content']})
+                
+                provider = _active_cfg.get('api_provider', '')
+                api_model = _active_cfg.get('api_model', '')
+                system_prompt = global_system_prompt or ''
+                
+                print(f"[DEBUG] API mode: provider={provider}, model={api_model}")
+                print(f"[DEBUG] system_prompt ({len(system_prompt)} chars): {system_prompt[:80]}{'...' if len(system_prompt) > 80 else ''}")
+                
+                for chunk in stream_chat(
+                    provider=provider,
+                    model=api_model,
+                    history=history,
+                    message=full_message,
+                    system_prompt=system_prompt,
+                    temperature=global_args.temperature,
+                    max_tokens=global_args.max_length
+                ):
+                    if chunk.get('error'):
+                        self.wfile.write(f"data: {json.dumps({'error': chunk['error']})}\n\n".encode('utf-8'))
+                        self.wfile.flush()
+                        break
+                    if chunk.get('token'):
+                        full_response += chunk['token']
+                        self.wfile.write(f"data: {json.dumps({'token': chunk['token']})}\n\n".encode('utf-8'))
+                        self.wfile.flush()
+                    if chunk.get('done'):
+                        break
+                
+                if full_response:
+                    conversation_manager.add_message(conv_id, 'assistant', full_response)
+                    response_saved = True
+                
+                self.wfile.write(f"data: {json.dumps({'done': True})}\n\n".encode('utf-8'))
+                self.wfile.flush()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                error_msg = f"API chat error: {str(e)}"
+                if not response_saved and full_response:
+                    conversation_manager.add_message(conv_id, 'assistant', full_response)
+                try:
+                    self.wfile.write(f"data: {json.dumps({'error': error_msg})}\n\n".encode('utf-8'))
+                    self.wfile.flush()
+                except:
+                    pass
+            return
+        
+        # --- Local Model Path (original logic) ---
         try:
             global global_stop_generation
             global_stop_generation = False  # Reset stop flag
@@ -2494,56 +2719,96 @@ Select and execute the appropriate tool."""
             # Build messages for model
             conv = conversation_manager.get_conversation(conv_id)
             history = []
-            for msg in conv.get('messages', [])[:-1]:  # Exclude the just-added message
+            msgs = conv.get('messages', [])
+            if not is_rerun:
+                msgs = msgs[:-1]  # Exclude the just-added user message
+            for msg in msgs:
                 history.append({'role': msg['role'], 'content': msg['content']})
             
-            # Extract images from processed files
-            images = []
-            for f in processed_files:
-                if f['type'] == 'image':
-                    try:
-                        if f.get('uploadId'):
-                            img_path = os.path.join(UPLOADS_DIR, f['uploadId'])
-                            if os.path.isfile(img_path):
-                                img = Image.open(img_path).convert('RGB')
-                                images.append(img)
-                            else:
-                                print(f"[Warning] Upload file not found: {f['uploadId']}")
-                        elif f.get('data'):
-                            img = process_image_from_base64(f['data'])
-                            images.append(img)
-                    except Exception as e:
-                        print(f"[Warning] Failed to process image: {e}")
-            
-            # Mode-based tool routing
-            mode = data.get('mode', 'agent')
-            use_tools = True
-            current_system_prompt = global_system_prompt
-            
-            if mode == 'agent':
-                # Agent mode: no tool routing, plain chat
-                use_tools = False
-                tools_schema = None
-                print(f"[DEBUG] Agent mode: tools disabled")
-            else:
-                # Plan mode: load plan system prompt and enable tools
-                plan_prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "PLAN_SYSTEM_PROMPT.txt")
-                if os.path.exists(plan_prompt_path):
-                    with open(plan_prompt_path, "r", encoding="utf-8") as f:
-                        current_system_prompt = f.read().strip()
+            if is_rerun and rerun_steps:
+                # --- RERUN BYPASS: skip LLM create_plan, use graph steps directly ---
+                history = [m for m in history if '[PLAN_COMPLETE]' not in m.get('content', '')]
+                
+                self._plan_state = {
+                    'steps': rerun_steps,
+                    'goal': rerun_goal,
+                    'current_step': 0,
+                    'all_results': []
+                }
+                
+                current_system_prompt = load_tool_select_prompt()
                 if TOOLS_AVAILABLE:
-                    from tools.base import get_plan_schema
-                    tools_schema = get_plan_schema()
+                    tools_schema = get_tools_schema()
                 else:
                     tools_schema = None
-            
-            # Build inputs (multimodal if images present)
-            if images and global_processor is not None:
-                messages = build_multimodal_messages(history, message, images, current_system_prompt)
-                inputs = build_inputs_multimodal(messages, images, global_processor, global_tokenizer, global_args)
+                
+                step = rerun_steps[0]
+                ref_ctx = _build_ref_context(step)
+                step_context = f"Execute step 1: {step.get('name', '')}. {step.get('description', '')}{ref_ctx} Choose and call the appropriate tool(s)."
+                history.append({'role': 'user', 'content': step_context})
+                
+                step_start_evt = json.dumps({'step_start': {'step': 1}})
+                self.wfile.write(f"data: {step_start_evt}\n\n".encode('utf-8'))
+                self.wfile.flush()
+                
+                print(f"[DEBUG] Rerun: bypassing create_plan, {len(rerun_steps)} steps from graph")
+                
+                synthetic_plan_msg = f"[TOOL_CALLS]create_plan[ARGS]{json.dumps({'goal': rerun_goal, 'steps': rerun_steps}, ensure_ascii=False)}"
+                conversation_manager.add_message(conv_id, 'assistant', synthetic_plan_msg)
+                response_saved = True
+                
+                inputs = _build_step_inputs(step, history, current_system_prompt, global_tokenizer, global_args, tools_schema)
             else:
-                messages = build_messages(history, message, current_system_prompt)
-                inputs = build_inputs(messages, global_tokenizer, global_args, tools=tools_schema, inject_tool_call_prefix=False)
+                # --- Normal flow ---
+                # Extract images from processed files
+                images = []
+                for f in processed_files:
+                    if f['type'] == 'image':
+                        try:
+                            if f.get('uploadId'):
+                                img_path = os.path.join(UPLOADS_DIR, f['uploadId'])
+                                if os.path.isfile(img_path):
+                                    img = Image.open(img_path).convert('RGB')
+                                    images.append(img)
+                                else:
+                                    print(f"[Warning] Upload file not found: {f['uploadId']}")
+                            elif f.get('data'):
+                                img = process_image_from_base64(f['data'])
+                                images.append(img)
+                        except Exception as e:
+                            print(f"[Warning] Failed to process image: {e}")
+                
+                # Mode-based tool routing
+                mode = data.get('mode', 'agent')
+                use_tools = True
+                current_system_prompt = global_system_prompt
+                
+                if mode == 'agent':
+                    # Agent mode: no tool routing, plain chat
+                    use_tools = False
+                    tools_schema = None
+                    print(f"[DEBUG] Agent mode: tools disabled")
+                else:
+                    # Plan mode: load plan system prompt and enable tools
+                    plan_prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "PLAN_SYSTEM_PROMPT.txt")
+                    if os.path.exists(plan_prompt_path):
+                        with open(plan_prompt_path, "r", encoding="utf-8") as f:
+                            current_system_prompt = f.read().strip()
+                    if TOOLS_AVAILABLE:
+                        from tools.base import get_plan_schema
+                        tools_schema = get_plan_schema()
+                    else:
+                        tools_schema = None
+                
+                # Build inputs (multimodal if images present)
+                sp_preview = (current_system_prompt or '')[:80]
+                print(f"[DEBUG] Local {mode} mode, system_prompt ({len(current_system_prompt or '')} chars): {sp_preview}{'...' if len(current_system_prompt or '') > 80 else ''}")
+                if images and global_processor is not None:
+                    messages = build_multimodal_messages(history, message, images, current_system_prompt)
+                    inputs = build_inputs_multimodal(messages, images, global_processor, global_tokenizer, global_args)
+                else:
+                    messages = build_messages(history, message, current_system_prompt)
+                    inputs = build_inputs(messages, global_tokenizer, global_args, tools=tools_schema, inject_tool_call_prefix=False)
             
             # Stream response with tool call support
             stopped = False
@@ -2653,7 +2918,8 @@ Select and execute the appropriate tool."""
                             # Execute tool calls and send results to UI
                             tool_results = []
                             
-                            for call in tool_calls:
+                            for _tc_idx, call in enumerate(tool_calls):
+                                _tc_remaining = len(tool_calls) - _tc_idx - 1
                                 tool_name = call.get('name', '')
                                 
                                 # Check if tool is None or empty - retry to get valid tool, or fallback to LLM text
@@ -2727,7 +2993,7 @@ Select and execute the appropriate tool."""
                                         # Send tool result event
                                         current_step = self._plan_state.get('current_step', 0) + 1 if hasattr(self, '_plan_state') and self._plan_state.get('steps') else None
                                         step_info_dict = {'step': current_step} if current_step else {}
-                                        self.wfile.write(f"data: {json.dumps({'tool_result': {**result, 'tool': 'llm_text', **step_info_dict}})}\n\n".encode('utf-8'))
+                                        self.wfile.write(f"data: {json.dumps({'tool_result': {**result, 'tool': 'llm_text', **step_info_dict, 'tools_remaining': _tc_remaining}})}\n\n".encode('utf-8'))
                                         self.wfile.flush()
                                         continue  # Skip normal tool execution
                                 
@@ -2735,16 +3001,39 @@ Select and execute the appropriate tool."""
                                 self.wfile.write(f"data: {json.dumps({'tool_call': {'name': call['name'], 'arguments': call['arguments'], 'status': 'running'}})}\n\n".encode('utf-8'))
                                 self.wfile.flush()
                                 
-                                # Pass conv_id/step_index to code_gen for auto-execution
+                                # Pass conv_id/step_index and file refs to code_gen
                                 if call['name'] == 'code_gen' and hasattr(self, '_plan_state') and self._plan_state.get('steps'):
                                     call['arguments']['conv_id'] = conv_id
-                                    call['arguments']['step_index'] = self._plan_state.get('current_step', 0)
+                                    step_idx = self._plan_state.get('current_step', 0)
+                                    call['arguments']['step_index'] = step_idx
+                                    step = self._plan_state['steps'][step_idx]
+                                    file_refs = _collect_file_refs(step)
+                                    if file_refs:
+                                        existing_ctx = call['arguments'].get('context', '')
+                                        call['arguments']['context'] = (existing_ctx +
+                                            '\n\nAvailable data files: ' + ', '.join(file_refs)).strip()
+                                    
+                                    # Save previous step results so subprocess code can access them
+                                    prev_results = self._plan_state.get('all_results', [])
+                                    if prev_results:
+                                        out_dir = os.path.join(OUTPUTS_DIR, str(conv_id), f'step_{step_idx}')
+                                        out_dir_fwd = out_dir.replace('\\', '/')
+                                        os.makedirs(out_dir, exist_ok=True)
+                                        prev_data_path = os.path.join(out_dir, '_prev_data.json')
+                                        try:
+                                            with open(prev_data_path, 'w', encoding='utf-8') as pf:
+                                                json.dump(prev_results, pf, ensure_ascii=False, default=str)
+                                            print(f"[code_gen] Saved {len(prev_results)} previous results to {prev_data_path}")
+                                        except Exception as e:
+                                            print(f"[code_gen] Failed to save prev data: {e}")
+                                        call['arguments']['data_dir'] = out_dir_fwd
                                 
                                 # Execute the tool
                                 result = execute_tool_call(call['name'], call['arguments'])
                                 
                                 # If failed, ask LLM to regenerate the tool call using unified retry function
-                                if not result.get('success', False):
+                                # Skip retry for code_gen -- it has its own internal fix loop
+                                if not result.get('success', False) and call['name'] != 'code_gen':
                                     error_msg = result.get('error', 'Unknown error')
                                     print(f"[DEBUG] Tool {call['name']} failed: {error_msg}")
                                     
@@ -2784,7 +3073,7 @@ Select and execute the appropriate tool."""
                                 # Send tool result event to UI (include tool name and step number for frontend step matching)
                                 current_step = self._plan_state.get('current_step', 0) + 1 if hasattr(self, '_plan_state') and self._plan_state.get('steps') else None
                                 step_info = {'step': current_step} if current_step else {}
-                                self.wfile.write(f"data: {json.dumps({'tool_result': {**result, 'tool': call['name'], **step_info}})}\n\n".encode('utf-8'))
+                                self.wfile.write(f"data: {json.dumps({'tool_result': {**result, 'tool': call['name'], **step_info, 'tools_remaining': _tc_remaining}})}\n\n".encode('utf-8'))
                                 self.wfile.flush()
                             
                             # Add assistant message with tool call SUMMARY to history (not raw tool call text)
@@ -2843,7 +3132,7 @@ Select and execute the appropriate tool."""
                                             'thought': result.get('thought', ''),
                                             'action': result.get('action', ''),
                                             'error': result.get('error', ''),
-                                            'result': res_data if isinstance(res_data, dict) else {'title': str(res_data)[:200]}
+                                            'result': res_data if isinstance(res_data, dict) else {'title': str(res_data)}
                                         }
                                         if global_stop_generation:
                                             result_entry['stopped'] = True
@@ -2956,14 +3245,14 @@ Select and execute the appropriate tool."""
                         'step': step_idx + 1,
                         'tool': 'text_fallback',
                         'success': True,
-                        'result': {'text': full_response[:500]}
+                        'result': {'text': full_response}
                     }
                     if global_stop_generation:
                         fallback_entry['stopped'] = True
                     self._plan_state['all_results'].append(fallback_entry)
                     
                     # Send fallback result to UI
-                    self.wfile.write(f"data: {json.dumps({'tool_result': {'success': True, 'tool': 'text_fallback', 'result': {'text': full_response[:200]}, 'step': step_idx + 1}})}\n\n".encode('utf-8'))
+                    self.wfile.write(f"data: {json.dumps({'tool_result': {'success': True, 'tool': 'text_fallback', 'result': {'text': full_response}, 'step': step_idx + 1}})}\n\n".encode('utf-8'))
                     self.wfile.flush()
                     
                     # Move to next step
@@ -3083,6 +3372,25 @@ def run_web_ui(model, tokenizer, model_name, system_prompt, args):
     global_args = args
     global_system_prompt = system_prompt
     global_model_name = model_name
+    
+    # Sync active_model.local_model with the loaded model
+    try:
+        from utils.api_chat import get_active_model, save_active_model
+        active = get_active_model()
+        needs_sync = (
+            not active.get('local_model')
+            or (active.get('mode') == 'api' and not active.get('api_provider'))
+        )
+        if needs_sync:
+            save_active_model(
+                mode='local',
+                local_model=model_name,
+                api_provider=active.get('api_provider', ''),
+                api_model=active.get('api_model', '')
+            )
+            print(f"[INFO] Reset active_model: mode=local, local_model={model_name}")
+    except Exception as e:
+        print(f"[Warning] Could not sync active_model config: {e}")
     
     # Load processor for multimodal input
     model_path = find_model_path(args.model)  # Convert model name to actual path

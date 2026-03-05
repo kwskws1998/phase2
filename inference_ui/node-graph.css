@@ -192,6 +192,7 @@
     --port-vector4: #7e57c2;
     --port-color: #ec407a;
     --port-table: #78909c;
+    --port-image: #ffca28;
 }
 
 /* ---- Port Rows (multi-port distribution) ---- */
@@ -252,6 +253,7 @@
 .ng-port[data-port-type="vector4"] { border-color: var(--port-vector4); }
 .ng-port[data-port-type="color"]   { border-color: var(--port-color); }
 .ng-port[data-port-type="table"]   { border-color: var(--port-table); }
+.ng-port[data-port-type="image"]   { border-color: var(--port-image); }
 
 .ng-port[data-port-type="float"]:hover   { background: var(--port-float); border-color: var(--port-float); }
 .ng-port[data-port-type="int"]:hover     { background: var(--port-int); border-color: var(--port-int); }
@@ -268,6 +270,7 @@
 .ng-port[data-port-type="vector4"]:hover { background: var(--port-vector4); border-color: var(--port-vector4); }
 .ng-port[data-port-type="color"]:hover   { background: var(--port-color); border-color: var(--port-color); }
 .ng-port[data-port-type="table"]:hover   { background: var(--port-table); border-color: var(--port-table); }
+.ng-port[data-port-type="image"]:hover   { background: var(--port-image); border-color: var(--port-image); }
 
 .ng-port-compatible {
     box-shadow: 0 0 3px currentColor;
@@ -371,6 +374,7 @@
 .ng-conn-type-vector4 { stroke: var(--port-vector4); }
 .ng-conn-type-color   { stroke: var(--port-color); }
 .ng-conn-type-table   { stroke: var(--port-table); }
+.ng-conn-type-image   { stroke: var(--port-image); }
 
 /* ---- Input Node Styles ---- */
 
@@ -790,6 +794,44 @@ textarea.ng-input-node-field {
     background: #9ca3af;
 }
 
+/* ---- Analyze Node (Tool) ---- */
+
+.ng-node[data-node-id="analysis-node"] {
+    border-style: dashed;
+    border-color: #8b5cf6;
+}
+
+.ng-node[data-node-id="analysis-node"] .ng-node-num {
+    background: #8b5cf6;
+}
+
+.ng-node[data-node-id="analysis-node"].ng-status-pending {
+    border-color: rgba(139, 92, 246, 0.4);
+}
+
+.ng-node[data-node-id="analysis-node"].ng-status-running {
+    border-color: #8b5cf6;
+    animation: ng-pulse-analyze 1.5s infinite;
+}
+
+.ng-node[data-node-id="analysis-node"].ng-status-running .ng-node-progress::after {
+    background: #8b5cf6;
+}
+
+@keyframes ng-pulse-analyze {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.3); }
+    50% { box-shadow: 0 0 0 6px rgba(139, 92, 246, 0); }
+}
+
+.ng-node[data-node-id="analysis-node"].ng-status-completed {
+    border-color: #8b5cf6;
+    border-style: solid;
+}
+
+.ng-node[data-node-id="analysis-node"].ng-status-completed .ng-node-num {
+    background: #8b5cf6;
+}
+
 /* ---- Running Progress Bar ---- */
 
 .ng-node-progress {
@@ -1069,6 +1111,72 @@ textarea.ng-input-node-field {
     color: #fff;
 }
 
+.ng-create-menu-item:hover .ng-create-menu-item-desc {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.ng-create-menu-item-name {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.ng-create-menu-item-desc {
+    font-size: 10px;
+    color: var(--text-muted, #888);
+    opacity: 0.7;
+    margin-top: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+}
+
+/* ---- Node Preview Popup ---- */
+
+.ng-node-preview-popup {
+    position: fixed;
+    width: 230px;
+    background: var(--bg-secondary, #1e1e1e);
+    border: 1px solid var(--border-color, #3a3a3a);
+    border-radius: 8px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+    z-index: 200;
+    padding: 12px;
+    pointer-events: none;
+    animation: ng-preview-fade-in 0.15s ease;
+}
+
+@keyframes ng-preview-fade-in {
+    from { opacity: 0; transform: translateX(-4px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+.ng-node-preview-desc {
+    font-size: 12px;
+    color: var(--text-secondary, #aaa);
+    margin-bottom: 10px;
+    line-height: 1.5;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color, #3a3a3a);
+}
+
+.ng-node-preview-render {
+    border: 1px solid var(--border-color, #3a3a3a);
+    border-radius: 6px;
+    padding: 8px;
+    background: transparent;
+    transform: scale(0.85);
+    transform-origin: top left;
+    pointer-events: none;
+    overflow: hidden;
+    max-height: 160px;
+}
+
+.ng-node-preview-render .ng-node {
+    position: relative;
+    min-width: auto;
+}
+
 /* Cyber-edge theme */
 
 [data-theme="cyber-edge"] .ng-create-menu {
@@ -1096,12 +1204,23 @@ textarea.ng-input-node-field {
     color: #fff;
 }
 
+[data-theme="cyber-edge"] .ng-node-preview-popup {
+    background: rgba(26, 26, 24, 0.98);
+    border-color: rgba(144, 145, 140, 0.3);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 1px rgba(144, 145, 140, 0.3);
+}
+
+[data-theme="cyber-edge"] .ng-node-preview-render {
+    background: transparent;
+    border-color: rgba(144, 145, 140, 0.2);
+}
+
 /* ---- Zoom Controls ---- */
 
 .ng-zoom-controls {
     position: absolute;
     top: 8px;
-    right: 42px;
+    right: 72px;
     display: flex;
     gap: 2px;
     opacity: 0.15;
@@ -1162,8 +1281,56 @@ textarea.ng-input-node-field {
     border-bottom-color: var(--accent-primary);
 }
 
-/* Popout window: no popout button, so zoom controls move to the edge */
+/* ---- Help Button ---- */
+
+.ng-help-btn {
+    position: absolute;
+    top: 8px;
+    right: 38px;
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0;
+    line-height: 1;
+    opacity: 0.15;
+    transition: opacity 0.3s ease, all 0.2s ease;
+    z-index: 30;
+}
+
+.ng-help-btn:hover {
+    opacity: 0.9;
+    background: var(--card-bg-hover);
+    color: var(--text-primary);
+    border-color: var(--primary-color);
+}
+
+[data-theme="cyber-edge"] .ng-help-btn {
+    background: rgba(30, 30, 28, 0.9);
+    border-color: rgba(144, 145, 140, 0.3);
+    color: rgba(144, 145, 140, 0.7);
+}
+
+[data-theme="cyber-edge"] .ng-help-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    background: rgba(43, 43, 41, 0.95);
+}
+
+/* Popout window: no popout button, so zoom controls & help move to the edge */
 .graph-standalone .ng-zoom-controls {
+    right: 38px;
+}
+
+.graph-standalone .ng-help-btn {
     right: 8px;
 }
 
@@ -1389,4 +1556,177 @@ textarea.ng-input-node-field {
 
 [data-theme="cyber-edge"] .ng-image-preview {
     border-color: rgba(144, 145, 140, 0.15);
+}
+
+/* ── Node Detail Widget (double-click popup) ── */
+
+.ng-node-detail-widget {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 151;
+    width: 420px;
+    max-height: 80vh;
+    overflow-y: auto;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    display: flex;
+    flex-direction: column;
+    font-size: 13px;
+    color: var(--text-color);
+}
+
+.ng-node-detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    border-radius: 8px 8px 0 0;
+    flex-shrink: 0;
+}
+
+.ng-node-detail-header-title {
+    font-weight: 600;
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    margin-right: 8px;
+}
+
+.ng-node-detail-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+.ng-node-detail-status[data-status="completed"] {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+}
+
+.ng-node-detail-status[data-status="running"] {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+}
+
+.ng-node-detail-status[data-status="error"] {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+.ng-node-detail-status[data-status="pending"] {
+    background: rgba(156, 163, 175, 0.15);
+    color: #9ca3af;
+}
+
+.ng-node-detail-close {
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.ng-node-detail-close:hover {
+    background: var(--card-bg-hover);
+    color: var(--text-color);
+}
+
+.ng-node-detail-body {
+    padding: 8px 0;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.ng-node-detail-section {
+    padding: 8px 14px;
+}
+
+.ng-node-detail-section + .ng-node-detail-section {
+    border-top: 1px solid var(--border-color);
+}
+
+.ng-node-detail-section-label {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+}
+
+.ng-node-detail-section-content {
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+    font-size: 12.5px;
+    color: var(--text-color);
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.ng-node-detail-section-content::-webkit-scrollbar {
+    width: 4px;
+}
+
+.ng-node-detail-section-content::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 2px;
+}
+
+.ng-node-detail-empty {
+    padding: 24px 14px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+/* Modal overlay for node detail widget */
+.ng-node-detail-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 150;
+    background: rgba(0, 0, 0, 0.3);
+}
+
+/* Result formatting within widget */
+.ng-node-detail-result-key {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    text-transform: capitalize;
+}
+.ng-node-detail-result-key:first-child {
+    margin-top: 0;
+}
+.ng-node-detail-result-val {
+    margin-bottom: 4px;
+    line-height: 1.5;
+}
+.ng-node-detail-result-val ul {
+    margin: 4px 0;
+    padding-left: 20px;
+}
+.ng-node-detail-result-val li {
+    margin-bottom: 2px;
 }

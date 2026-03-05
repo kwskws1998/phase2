@@ -66,6 +66,8 @@ NodeRegistry.register('my_custom', {
 
     defaultConfig: {
         title: 'My Custom',
+        menuTag: { en: 'Custom', ko: '커스텀' },
+        description: { en: 'Run custom processing on input data', ko: '입력 데이터에 대해 커스텀 처리 실행' },
         status: 'pending'
     },
 
@@ -120,7 +122,7 @@ Node files are discovered automatically via the `/api/node-manifest` endpoint. R
 | `label` | string | No | Display name in the menu (defaults to type) |
 | `category` | string | No | Category group (defaults to `'General'`) |
 | `ports` | Port[] | No | Array of port definitions |
-| `defaultConfig` | object | No | Default values when a node is created |
+| `defaultConfig` | object | No | Default values when a node is created. Can include `menuTag` and `description` as language objects (see below) |
 | `render(node, helpers)` | function | Yes | Returns a DOM element for the node |
 | `afterRender(el, node, helpers)` | function | No | Post-render setup (event listeners, etc.) |
 | `getDragHandle(el)` | function | No | Returns the drag handle element |
@@ -130,6 +132,68 @@ Node files are discovered automatically via the `/api/node-manifest` endpoint. R
 | `result` | boolean | No | Marks a node that produces a visible result (display, save) |
 | `resolveOutputType` | function | No | Dynamic output type resolver. Receives an array of connected input types and returns the resolved output type string. See the Add node for an example. |
 | `allowRef` | boolean | No | Allows the node to receive reference connections. Only LLM-using nodes (General: Step/Composite, all Tool nodes) should set this to `true`. Nodes without `allowRef: true` will have their ports dimmed and will reject ref connections. |
+
+### defaultConfig.menuTag and defaultConfig.description (Optional)
+
+Node descriptions are self-contained within the node definition file. No external JSON file editing is required.
+
+| Property | Purpose | Display Location |
+|----------|---------|-----------------|
+| `menuTag` | Short tag (1-2 words) | Below the node name in the Create Node menu |
+| `description` | Detailed description | Hover preview popup in the Create Node menu |
+
+Both properties accept a **language-specific object** where keys are language codes:
+
+```javascript
+defaultConfig: {
+    title: 'My Node',
+    menuTag: { en: 'Custom', ko: '커스텀' },
+    description: { en: 'Run custom processing on input data', ko: '입력 데이터에 대해 커스텀 처리 실행' },
+    status: 'pending'
+}
+```
+
+**Fallback rules:**
+
+- If the current UI language key exists, that translation is shown.
+- If not, the `en` (English) value is used as fallback.
+- If neither exists (or the property is omitted), nothing is displayed.
+
+You only need to provide the languages you can translate. At minimum, provide `en` for English. Additional languages can be added at any time by inserting new keys into the object.
+
+### Supported Language Codes
+
+The following language codes are supported by the i18n system (defined in `i18n.js`):
+
+| Code | Language |
+|------|----------|
+| `en` | English |
+| `ko` | 한국어 (Korean) |
+| `ja` | 日本語 (Japanese) |
+| `zh` | 简体中文 (Simplified Chinese) |
+| `fr` | Français (French) |
+| `de` | Deutsch (German) |
+| `es` | Español (Spanish) |
+| `it` | Italiano (Italian) |
+| `pt` | Português (Portuguese) |
+| `nl` | Nederlands (Dutch) |
+| `ru` | Русский (Russian) |
+| `ar` | العربية (Arabic) |
+| `hi` | हिन्दी (Hindi) |
+| `tr` | Türkçe (Turkish) |
+| `pl` | Polski (Polish) |
+| `cs` | Čeština (Czech) |
+| `sv` | Svenska (Swedish) |
+| `da` | Dansk (Danish) |
+| `no` | Norsk (Norwegian) |
+| `fi` | Suomi (Finnish) |
+| `el` | Ελληνικά (Greek) |
+| `hu` | Magyar (Hungarian) |
+| `ro` | Română (Romanian) |
+| `uk` | Українська (Ukrainian) |
+| `vi` | Tiếng Việt (Vietnamese) |
+| `th` | ภาษาไทย (Thai) |
+| `id` | Bahasa Indonesia (Indonesian) |
 
 ### Port Definition
 
@@ -393,6 +457,8 @@ Verify the following when adding a new node:
 
 - [ ] Created file at `nodes/<folder>/<name>-node.js`
 - [ ] Used a unique type string in `NodeRegistry.register()`
+- [ ] `defaultConfig.menuTag` has at least an `en` key (optional but recommended)
+- [ ] `defaultConfig.description` has at least an `en` key (optional but recommended)
 - [ ] `render()` returns a DOM element
 - [ ] Port elements have correct `data-port-name`, `data-port-dir`, `data-port-type`, and `data-node-id` attributes
 - [ ] `getDragHandle()` defined (falls back to `.ng-node-header` if omitted)

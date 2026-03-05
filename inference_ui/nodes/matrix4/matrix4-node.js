@@ -13,6 +13,8 @@ NodeRegistry.register('matrix4', {
 
     defaultConfig: {
         title: 'Matrix 4x4',
+        menuTag: { en: 'Matrix', ko: '행렬', ja: '行列', zh: '矩阵', fr: 'Matrice', de: 'Matrix', es: 'Matriz', it: 'Matrice', pt: 'Matriz', nl: 'Matrix', ru: 'Матрица', ar: 'مصفوفة', hi: 'मैट्रिक्स', tr: 'Matris', pl: 'Macierz', cs: 'Matice', sv: 'Matris', da: 'Matrix', no: 'Matrise', fi: 'Matriisi', el: 'Μήτρα', hu: 'Mátrix', ro: 'Matrice', uk: 'Матриця', vi: 'Ma trận', th: 'เมทริกซ์', id: 'Matriks' },
+        description: { en: '4x4 matrix input', ko: '4x4 행렬 입력', ja: '4x4 行列入力', zh: '4x4 矩阵输入', fr: 'Entrée matrice 4x4', de: '4x4-Matrixeingabe', es: 'Entrada de matriz 4x4', it: 'Input matrice 4x4', pt: 'Entrada de matriz 4x4', nl: '4x4 matrix-invoer', ru: 'Ввод матрицы 4x4', ar: 'إدخال مصفوفة 4x4', hi: '4x4 मैट्रिक्स इनपुट', tr: '4x4 matris girişi', pl: 'Wejście macierzy 4x4', cs: 'Vstup matice 4x4', sv: '4x4 matrisinmatning', da: '4x4 matrix-input', no: '4x4 matriseinndata', fi: '4x4-matriisin syöttö', el: 'Είσοδος μήτρας 4x4', hu: '4x4 mátrix bevitel', ro: 'Intrare matrice 4x4', uk: 'Введення матриці 4x4', vi: 'Nhập ma trận 4x4', th: 'อินพุตเมทริกซ์ 4x4', id: 'Input matriks 4x4' },
         status: 'completed',
         portValues: { out: [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1] }
     },

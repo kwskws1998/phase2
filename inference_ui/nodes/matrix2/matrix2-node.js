@@ -13,6 +13,8 @@ NodeRegistry.register('matrix2', {
 
     defaultConfig: {
         title: 'Matrix 2x2',
+        menuTag: { en: 'Matrix', ko: '행렬', ja: '行列', zh: '矩阵', fr: 'Matrice', de: 'Matrix', es: 'Matriz', it: 'Matrice', pt: 'Matriz', nl: 'Matrix', ru: 'Матрица', ar: 'مصفوفة', hi: 'मैट्रिक्स', tr: 'Matris', pl: 'Macierz', cs: 'Matice', sv: 'Matris', da: 'Matrix', no: 'Matrise', fi: 'Matriisi', el: 'Μήτρα', hu: 'Mátrix', ro: 'Matrice', uk: 'Матриця', vi: 'Ma trận', th: 'เมทริกซ์', id: 'Matriks' },
+        description: { en: '2x2 matrix input', ko: '2x2 행렬 입력', ja: '2x2 行列入力', zh: '2x2 矩阵输入', fr: 'Entrée matrice 2x2', de: '2x2-Matrixeingabe', es: 'Entrada de matriz 2x2', it: 'Input matrice 2x2', pt: 'Entrada de matriz 2x2', nl: '2x2 matrix-invoer', ru: 'Ввод матрицы 2x2', ar: 'إدخال مصفوفة 2x2', hi: '2x2 मैट्रिक्स इनपुट', tr: '2x2 matris girişi', pl: 'Wejście macierzy 2x2', cs: 'Vstup matice 2x2', sv: '2x2 matrisinmatning', da: '2x2 matrix-input', no: '2x2 matriseinndata', fi: '2x2-matriisin syöttö', el: 'Είσοδος μήτρας 2x2', hu: '2x2 mátrix bevitel', ro: 'Intrare matrice 2x2', uk: 'Введення матриці 2x2', vi: 'Nhập ma trận 2x2', th: 'อินพุตเมทริกซ์ 2x2', id: 'Input matriks 2x2' },
         status: 'completed',
         portValues: { out: [1,0, 0,1] }
     },

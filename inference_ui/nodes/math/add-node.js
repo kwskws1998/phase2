@@ -24,6 +24,8 @@ NodeRegistry.register('math_add', {
 
     defaultConfig: {
         title: 'Add',
+        menuTag: { en: 'Math', ko: '덧셈', ja: '数学', zh: '数学', fr: 'Math', de: 'Mathe', es: 'Matemáticas', it: 'Matematica', pt: 'Matemática', nl: 'Wiskunde', ru: 'Математика', ar: 'رياضيات', hi: 'गणित', tr: 'Matematik', pl: 'Matematyka', cs: 'Matematika', sv: 'Matematik', da: 'Matematik', no: 'Matematikk', fi: 'Matematiikka', el: 'Μαθηματικά', hu: 'Matematika', ro: 'Matematică', uk: 'Математика', vi: 'Toán học', th: 'คณิตศาสตร์', id: 'Matematika' },
+        description: { en: 'Add two values (A + B)', ko: '두 값을 더하기 (A + B)', ja: '2つの値を加算 (A + B)', zh: '两个值相加 (A + B)', fr: 'Additionner deux valeurs (A + B)', de: 'Zwei Werte addieren (A + B)', es: 'Sumar dos valores (A + B)', it: 'Somma due valori (A + B)', pt: 'Somar dois valores (A + B)', nl: 'Twee waarden optellen (A + B)', ru: 'Сложить два значения (A + B)', ar: 'جمع قيمتين (A + B)', hi: 'दो मानों को जोड़ें (A + B)', tr: 'İki değeri topla (A + B)', pl: 'Dodaj dwie wartości (A + B)', cs: 'Sečíst dvě hodnoty (A + B)', sv: 'Addera två värden (A + B)', da: 'Læg to værdier sammen (A + B)', no: 'Legg sammen to verdier (A + B)', fi: 'Lisää kaksi arvoa (A + B)', el: 'Πρόσθεση δύο τιμών (A + B)', hu: 'Két érték összeadása (A + B)', ro: 'Adunarea a două valori (A + B)', uk: 'Додати два значення (A + B)', vi: 'Cộng hai giá trị (A + B)', th: 'บวกสองค่า (A + B)', id: 'Jumlahkan dua nilai (A + B)' },
         status: 'pending',
         portValues: { a: 0, b: 0 }
     },

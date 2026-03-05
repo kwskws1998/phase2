@@ -11,20 +11,23 @@
 <body>
     <div class="graph-standalone">
         <div class="graph-standalone-header">
-            <span>Plan Graph Editor</span>
-            <button id="rerunPlanBtn">Re-run Plan</button>
+            <span data-i18n="label.graph_editor">Plan Graph Editor</span>
+            <button id="rerunPlanBtn" data-i18n="label.rerun_plan">Re-run Plan</button>
         </div>
         <div class="node-graph-container" id="nodeGraphContainer">
             <svg class="node-graph-svg" id="nodeGraphSvg"></svg>
             <div class="node-graph-canvas" id="nodeGraphCanvas"></div>
             <div class="ng-zoom-controls">
-                <button class="ng-zoom-btn" data-zoom="in" title="Zoom In">+</button>
-                <button class="ng-zoom-btn" data-zoom="out" title="Zoom Out">&minus;</button>
-                <button class="ng-zoom-btn" data-zoom="reset" title="Reset Zoom">&#8962;</button>
+                <button class="ng-zoom-btn" data-zoom="in" title="Zoom In" data-i18n-title="tooltip.zoom_in">+</button>
+                <button class="ng-zoom-btn" data-zoom="out" title="Zoom Out" data-i18n-title="tooltip.zoom_out">&minus;</button>
+                <button class="ng-zoom-btn" data-zoom="reset" title="Reset Zoom" data-i18n-title="tooltip.zoom_reset">&#8962;</button>
             </div>
+            <button class="ng-help-btn" title="Help / Documentation" data-i18n-title="tooltip.help"
+                    onclick="window.open('https://github.com/Science-Will-Win/phase2/tree/main/inference_ui','_blank')">?</button>
         </div>
     </div>
 
+    <script src="i18n.js"></script>
     <script src="nodes/node-registry.js"></script>
     <script>
     // ============================================
@@ -44,6 +47,8 @@
             document.head.appendChild(s);
         });
         await loadScript('node-graph.js');
+
+        await initI18n();
 
         const theme = localStorage.getItem('theme') || 'soft-minimal';
         document.documentElement.setAttribute('data-theme', theme);
