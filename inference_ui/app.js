@@ -12,7 +12,7 @@ let currentMessages = [];
 let editingIndex = -1;  // -1 = not in edit mode
 let pendingFiles = [];  // Attached files array { type: 'image'|'audio', name, data }
 let scrollLockUntil = 0;  // Scroll lock release time (timestamp)
-let currentStepQuestion = null;  // Step question context { stepNum, tool, stepName, context, previousSteps }
+let currentStepQuestions = [];  // Array of { stepNum, tool, stepName, context, previousSteps, planGoal, planSteps }
 
 // Detail Panel State
 let detailPanelOpen = true;
@@ -246,7 +246,7 @@ function setupEventListeners() {
     // Enter to send, Backspace to remove tag
     messageInput.addEventListener('keydown', (e) => {
         // Delete tag with Backspace (when input is empty)
-        if (e.key === 'Backspace' && messageInput.value === '' && currentStepQuestion) {
+        if (e.key === 'Backspace' && messageInput.value === '' && currentStepQuestions.length > 0) {
             removeStepTag();
             e.preventDefault();
             return;
@@ -573,10 +573,10 @@ function renderConversationsList() {
 }
 
 async function loadConversation(id) {
-    // Stop generation when switching chats (content so far is auto-saved on server)
+    // Warn before stopping generation when switching chats
     if (isStreaming && currentConversationId !== id) {
+        if (!await showConfirmModal(t('confirm.stop_generation'))) return;
         stopGeneration();
-        // Brief wait to let server save partial response
         await new Promise(r => setTimeout(r, 300));
     }
     
@@ -601,14 +601,15 @@ async function loadConversation(id) {
 }
 
 async function createNewChat() {
-    // Hide detail panel for new chat
-    hideDetailPanel();
-    
-    // Stop if generating (content so far is auto-saved on server)
+    // Warn before stopping generation
     if (isStreaming) {
+        if (!await showConfirmModal(t('confirm.stop_generation'))) return;
         stopGeneration();
         await new Promise(r => setTimeout(r, 300));
     }
+    
+    // Hide detail panel for new chat
+    hideDetailPanel();
     
     // Activate auto-scroll for new chat
     scrollLockUntil = 0;
@@ -631,6 +632,12 @@ async function createNewChat() {
 async function deleteConversation(event, id) {
     event.stopPropagation();
     
+    if (isStreaming && currentConversationId === id) {
+        if (!await showConfirmModal(t('confirm.stop_generation'))) return;
+        stopGeneration();
+        await new Promise(r => setTimeout(r, 300));
+    }
+    
     if (!confirm(t('confirm.delete_conversation'))) return;
     
     try {
@@ -651,6 +658,13 @@ async function deleteConversation(event, id) {
 
 async function clearCurrentChat() {
     if (!currentConversationId) return;
+    
+    if (isStreaming) {
+        if (!await showConfirmModal(t('confirm.stop_generation'))) return;
+        stopGeneration();
+        await new Promise(r => setTimeout(r, 300));
+    }
+    
     if (!confirm(t('confirm.clear_messages'))) return;
     
     // Hide detail panel when clearing chat
@@ -768,6 +782,7 @@ function createMessageHTML(message, index = -1) {
         
         // Render markdown and convert step tag markers
         let renderedContent = renderMarkdown(textContent);
+        renderedContent = renderedContent.replace(/\{\{STEP_TAG:0\}\}/g, `<span class="chat-step-tag">${t('label.entire_plan')}</span>`);
         renderedContent = renderedContent.replace(/\{\{STEP_TAG:(\d+)\}\}/g, '<span class="chat-step-tag">Step $1</span>');
         
         contentHTML = filesHTML + `<div class="answer-content">${renderedContent}</div>`;
@@ -1091,17 +1106,25 @@ function createInlinePlanStepsHTML(args) {
     const goal = args.goal || '';
     const steps = args.steps || [];
     
-    // Goal header with plan reference button (same structure as createCompletedPlanHTML)
+    // Goal header with plan reference and regenerate buttons
     let goalHTML = goal ? `
         <div class="plan-goal plan-goal-row">
             <span class="plan-goal-text">${escapeHtml(goal)}</span>
-            <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="${t('tooltip.plan_ref')}">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                    <line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-            </button>
+            <div class="plan-goal-actions">
+                <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="${t('tooltip.plan_ref')}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                </button>
+                <button class="plan-regen-btn" onclick="regeneratePlanFromBox(this)" title="${t('tooltip.regenerate_plan')}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"/>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                    </svg>
+                </button>
+            </div>
         </div>
     ` : '';
     
@@ -1159,17 +1182,25 @@ function createCompletedPlanHTML(planData) {
     
     const resultMap = mergeResultsByStep(results);
     
-    // Goal header with plan reference button (button inside goal bar)
+    // Goal header with plan reference and regenerate buttons
     let goalHTML = goal ? `
         <div class="plan-goal plan-goal-row">
             <span class="plan-goal-text">${escapeHtml(goal)}</span>
-            <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="${t('tooltip.plan_ref')}">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                    <line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-            </button>
+            <div class="plan-goal-actions">
+                <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="${t('tooltip.plan_ref')}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                </button>
+                <button class="plan-regen-btn" onclick="regeneratePlanFromBox(this)" title="${t('tooltip.regenerate_plan')}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"/>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                    </svg>
+                </button>
+            </div>
         </div>
     ` : '';
     
@@ -1369,18 +1400,19 @@ async function sendMessage(customContent = null) {
     
     if ((!content && files.length === 0) || isStreaming) return;
     
-    // Check for step question tag (pill-based)
+    // Check for step question tags (pill-based)
     const stepTag = document.querySelector('#inputTags .input-tag');
-    if (stepTag && currentStepQuestion && content) {
+    if (stepTag && currentStepQuestions.length > 0 && content) {
         await sendStepQuestionFromMain(content);
-        // Clear tag after sending
+        // Clear tags after sending
+        currentStepQuestions = [];
         document.getElementById('inputTags').innerHTML = '';
         messageInput.placeholder = t('placeholder.message');
         return;
     }
     
     // Clear step question context if not a step question
-    currentStepQuestion = null;
+    currentStepQuestions = [];
     document.getElementById('inputTags').innerHTML = '';
     messageInput.placeholder = t('placeholder.message');
     
@@ -2504,6 +2536,34 @@ function closeModal(modalId) {
     document.getElementById(modalId).classList.remove('active');
 }
 
+function showConfirmModal(message, { title, okText, cancelText } = {}) {
+    return new Promise(resolve => {
+        const modal = document.getElementById('confirmStopModal');
+        const titleEl = document.getElementById('confirmStopTitle');
+        const msgEl = document.getElementById('confirmStopMessage');
+        const okBtn = document.getElementById('confirmStopOk');
+        const cancelBtn = document.getElementById('confirmStopCancel');
+
+        titleEl.textContent = title || t('label.warning') || 'Warning';
+        msgEl.textContent = message;
+        okBtn.textContent = okText || t('label.stop_generation') || 'Stop';
+        cancelBtn.textContent = cancelText || t('label.cancel') || 'Cancel';
+
+        function cleanup(result) {
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+            modal.classList.remove('active');
+            resolve(result);
+        }
+        function onOk() { cleanup(true); }
+        function onCancel() { cleanup(false); }
+
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        modal.classList.add('active');
+    });
+}
+
 // Rename Modal
 document.getElementById('renameBtn').addEventListener('click', async () => {
     if (!currentConversationId) {
@@ -2808,6 +2868,7 @@ document.querySelectorAll('.modal').forEach(modal => {
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         document.querySelectorAll('.modal.active').forEach(modal => {
+            if (modal.id === 'confirmStopModal') return;
             modal.classList.remove('active');
         });
     }
@@ -2839,17 +2900,25 @@ function createPlanStepsBox(toolCall) {
     const goal = args.goal || '';
     const steps = args.steps || [];
     
-    // Goal header with plan reference button
+    // Goal header with plan reference and regenerate buttons
     let goalHTML = goal ? `
         <div class="plan-goal plan-goal-row">
             <span class="plan-goal-text">${escapeHtml(goal)}</span>
-            <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="${t('tooltip.plan_ref')}">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                    <line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-            </button>
+            <div class="plan-goal-actions">
+                <button class="plan-ref-btn" onclick="askAboutPlan(this)" title="${t('tooltip.plan_ref')}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                </button>
+                <button class="plan-regen-btn" onclick="regeneratePlanFromBox(this)" title="${t('tooltip.regenerate_plan')}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"/>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                    </svg>
+                </button>
+            </div>
         </div>
     ` : '';
     
@@ -3161,13 +3230,66 @@ function cancelStepEdit(stepNum) {
 }
 
 /**
+ * Regenerate plan from scratch using the same goal.
+ * Follows the same truncate-and-resend pattern as regenerateFrom().
+ */
+async function regeneratePlanFromBox(btn) {
+    if (!currentConversationId || isStreaming) return;
+
+    const planBox = btn.closest('.plan-steps-box');
+    const messageEl = planBox?.closest('.message');
+    const assistantIdx = parseInt(messageEl?.getAttribute('data-index'), 10);
+    if (isNaN(assistantIdx) || assistantIdx < 1) return;
+
+    const userIdx = assistantIdx - 1;
+    const prevMessage = currentMessages[userIdx];
+    if (!prevMessage || prevMessage.role !== 'user') return;
+
+    const userContent = prevMessage.content;
+
+    try {
+        const response = await fetch(
+            `/api/conversation/${currentConversationId}/truncate`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ from_index: userIdx })
+            }
+        );
+        if (!response.ok) return;
+
+        const messageElements = messagesWrapper.querySelectorAll('.message');
+        for (let i = messageElements.length - 1; i >= 0; i--) {
+            const dataIdx = parseInt(messageElements[i].getAttribute('data-index'), 10);
+            if (dataIdx >= userIdx) messageElements[i].remove();
+        }
+        currentMessages = currentMessages.slice(0, userIdx);
+
+        const prevMode = currentMode;
+        currentMode = 'plan';
+        await sendMessage(userContent);
+        currentMode = prevMode;
+    } catch (error) {
+        console.error('Error regenerating plan:', error);
+    }
+}
+
+/**
  * Ask about entire plan (ask referencing the full Plan)
  */
 function askAboutPlan(btn) {
+    // Toggle: if plan tag already exists, remove it
+    const existingIdx = currentStepQuestions.findIndex(q => q.stepNum === 0);
+    if (existingIdx !== -1) {
+        currentStepQuestions.splice(existingIdx, 1);
+        renderStepTags();
+        messageInput.focus();
+        return;
+    }
+
     const planBox = btn.closest('.plan-steps-box');
     const planGoal = planBox?.querySelector('.plan-goal')?.textContent || '';
     
-    // Collect all steps with results
     const allSteps = planBox?.querySelectorAll('.plan-step') || [];
     const planSteps = [];
     allSteps.forEach(s => {
@@ -3179,28 +3301,17 @@ function askAboutPlan(btn) {
         });
     });
     
-    // Set context for plan-level question
-    currentStepQuestion = { 
-        stepNum: 0,  // 0 = plan level
+    currentStepQuestions.push({
+        stepNum: 0,
         tool: 'plan',
         stepName: t('label.entire_plan'),
         context: '',
         previousSteps: [],
         planGoal,
         planSteps
-    };
+    });
     
-    // Add tag pill
-    const inputTags = document.getElementById('inputTags');
-    inputTags.innerHTML = `
-        <span class="input-tag" data-step="plan">
-            ${t('label.entire_plan')}
-            <span class="input-tag-remove" onclick="removeStepTag()">×</span>
-        </span>
-    `;
-    
-    messageInput.value = '';
-    messageInput.placeholder = t('placeholder.plan_question');
+    renderStepTags();
     messageInput.focus();
     messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
@@ -3209,6 +3320,15 @@ function askAboutPlan(btn) {
  * Ask about step (add tag to main input field)
  */
 function askAboutStep(stepNum) {
+    // Toggle: if this step tag already exists, remove it
+    const existingIdx = currentStepQuestions.findIndex(q => q.stepNum === stepNum);
+    if (existingIdx !== -1) {
+        currentStepQuestions.splice(existingIdx, 1);
+        renderStepTags();
+        messageInput.focus();
+        return;
+    }
+
     const step = document.querySelector(`.plan-step[data-step-id="${stepNum}"]`);
     if (!step) return;
     
@@ -3217,11 +3337,9 @@ function askAboutStep(stepNum) {
     const resultEl = step.querySelector('.step-result');
     const context = resultEl?.innerText || '';
     
-    // Collect plan info (goal + all steps structure)
     const planBox = step.closest('.plan-steps-box');
     const planGoal = planBox?.querySelector('.plan-goal')?.textContent || '';
     
-    // Collect all steps structure (for plan context)
     const allStepsInPlan = planBox?.querySelectorAll('.plan-step') || [];
     const planSteps = [];
     allStepsInPlan.forEach(s => {
@@ -3233,7 +3351,6 @@ function askAboutStep(stepNum) {
         });
     });
     
-    // Collect previous steps with results (for detailed context)
     const previousSteps = [];
     allStepsInPlan.forEach(s => {
         const sNum = parseInt(s.dataset.stepId);
@@ -3246,40 +3363,54 @@ function askAboutStep(stepNum) {
         }
     });
     
-    // Store context for when message is sent
-    currentStepQuestion = { 
-        stepNum, tool, stepName, context, 
+    currentStepQuestions.push({
+        stepNum, tool, stepName, context,
         previousSteps,
-        planGoal,      // Plan goal
-        planSteps      // Full plan structure (for reference when creating new plan)
-    };
+        planGoal,
+        planSteps
+    });
     
-    // Add tag pill (instead of text)
-    const inputTags = document.getElementById('inputTags');
-    inputTags.innerHTML = `
-        <span class="input-tag" data-step="${stepNum}">
-            Step ${stepNum}
-            <span class="input-tag-remove" onclick="removeStepTag()">×</span>
-        </span>
-    `;
-    
-    // Clear input and focus
-    messageInput.value = '';
-    messageInput.placeholder = t('placeholder.step_question', {num: stepNum});
+    renderStepTags();
     messageInput.focus();
-    
-    // Scroll to input area
     messageInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 /**
- * Remove step tag from input
+ * Render all step tag pills in the input area
+ */
+function renderStepTags() {
+    const inputTags = document.getElementById('inputTags');
+    if (currentStepQuestions.length === 0) {
+        inputTags.innerHTML = '';
+        messageInput.placeholder = t('placeholder.message');
+        return;
+    }
+    inputTags.innerHTML = currentStepQuestions.map(q => {
+        const label = q.stepNum === 0 ? t('label.entire_plan') : `Step ${q.stepNum}`;
+        const dataStep = q.stepNum === 0 ? 'plan' : q.stepNum;
+        return `<span class="input-tag" data-step="${dataStep}">
+            ${label}
+            <span class="input-tag-remove" onclick="removeStepTagByNum(${q.stepNum})">×</span>
+        </span>`;
+    }).join('');
+    const nums = currentStepQuestions.map(q => q.stepNum === 0 ? 'Plan' : q.stepNum).join(', ');
+    messageInput.placeholder = t('placeholder.step_question', { num: nums });
+}
+
+/**
+ * Remove a specific step tag by stepNum
+ */
+function removeStepTagByNum(stepNum) {
+    currentStepQuestions = currentStepQuestions.filter(q => q.stepNum !== stepNum);
+    renderStepTags();
+}
+
+/**
+ * Remove all step tags from input
  */
 function removeStepTag() {
-    const inputTags = document.getElementById('inputTags');
-    inputTags.innerHTML = '';
-    currentStepQuestion = null;
-    messageInput.placeholder = t('placeholder.message');
+    currentStepQuestions = [];
+    renderStepTags();
 }
 
 /**
@@ -3372,30 +3503,38 @@ async function sendStepQuestion(stepNum) {
  * Send step question from main input (question with @StepN: tag)
  */
 async function sendStepQuestionFromMain(question) {
-    if (!currentStepQuestion || !currentConversationId) {
-        // Remove tag and return
+    if (currentStepQuestions.length === 0 || !currentConversationId) {
+        currentStepQuestions = [];
         document.getElementById('inputTags').innerHTML = '';
         messageInput.placeholder = t('placeholder.message');
-        currentStepQuestion = null;
         return;
     }
     
-    const { stepNum, tool, stepName, context, previousSteps, planGoal, planSteps } = currentStepQuestion;
+    // Collect all tagged steps for backend
+    const steps = currentStepQuestions.map(q => ({
+        step_num: q.stepNum,
+        tool: q.tool,
+        step_name: q.stepName,
+        step_context: q.context,
+        previous_steps: q.previousSteps
+    }));
+    const planGoal = currentStepQuestions[0].planGoal;
+    const planSteps = currentStepQuestions[0].planSteps;
     
     // Clear input
     messageInput.value = '';
     messageInput.style.height = 'auto';
     
-    // Remove tag immediately (at send time)
+    // Remove tags immediately (at send time)
     document.getElementById('inputTags').innerHTML = '';
     messageInput.placeholder = t('placeholder.message');
     
     // Hide welcome message
     if (welcomeMessage) welcomeMessage.style.display = 'none';
     
-    // Show user's question in chat (using createMessageHTML)
-    // Use marker that will be converted to tag pill after rendering
-    const userMsgContent = `{{STEP_TAG:${stepNum}}} ${question}`;
+    // Build tag markers for all tagged steps
+    const tagMarkers = currentStepQuestions.map(q => `{{STEP_TAG:${q.stepNum}}}`).join(' ');
+    const userMsgContent = `${tagMarkers} ${question}`;
     
     // Add to currentMessages for proper indexing
     currentMessages.push({role: 'user', content: userMsgContent});
@@ -3405,8 +3544,6 @@ async function sendStepQuestionFromMain(question) {
     messagesWrapper.insertAdjacentHTML('beforeend', userHTML);
     scrollToBottom();
     
-    // Create assistant message placeholder (using createMessageHTML)
-    // Add placeholder to currentMessages
     currentMessages.push({role: 'assistant', content: ''});
     const assistantIndex = currentMessages.length - 1;
     
@@ -3415,17 +3552,14 @@ async function sendStepQuestionFromMain(question) {
     const assistantMsgEl = messagesWrapper.lastElementChild;
     const contentDiv = assistantMsgEl.querySelector('.answer-content');
     
-    // Safety check
     if (!contentDiv) {
         console.error('contentDiv not found in assistant message');
-        // Remove tag and return
+        currentStepQuestions = [];
         document.getElementById('inputTags').innerHTML = '';
         messageInput.placeholder = t('placeholder.message');
-        currentStepQuestion = null;
         return;
     }
     
-    // Show streaming indicator
     contentDiv.innerHTML = '<span class="streaming-indicator"><span class="streaming-dot"></span><span class="streaming-dot"></span><span class="streaming-dot"></span></span>';
     
     isStreaming = true;
@@ -3437,11 +3571,7 @@ async function sendStepQuestionFromMain(question) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 conv_id: currentConversationId,
-                step_num: stepNum,
-                tool: tool,
-                step_name: stepName,
-                step_context: context,
-                previous_steps: previousSteps,
+                steps: steps,
                 plan_goal: planGoal,
                 plan_steps: planSteps,
                 question: question
@@ -3454,7 +3584,7 @@ async function sendStepQuestionFromMain(question) {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let answerText = '';
-            let buffer = '';  // Buffer for incomplete SSE lines
+            let buffer = '';
             
             while (true) {
                 const { done, value } = await reader.read();
@@ -3462,7 +3592,7 @@ async function sendStepQuestionFromMain(question) {
                 
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
-                buffer = lines.pop();  // Keep incomplete line for next chunk
+                buffer = lines.pop();
                 
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
@@ -3481,14 +3611,11 @@ async function sendStepQuestionFromMain(question) {
                 }
             }
             
-            // Final render
             if (answerText) {
                 contentDiv.innerHTML = renderMarkdown(answerText);
-                // Update currentMessages with final answer
                 currentMessages[assistantIndex] = {role: 'assistant', content: answerText};
             }
             
-            // Reload sidebar to show updated conversation
             loadConversations();
         } else {
             contentDiv.innerHTML = '<span class="error">' + t('error.request_failed') + '</span>';
@@ -3499,8 +3626,7 @@ async function sendStepQuestionFromMain(question) {
     } finally {
         isStreaming = false;
         setStreamingUI(false);
-        currentStepQuestion = null;
-        // Ensure tag is removed
+        currentStepQuestions = [];
         document.getElementById('inputTags').innerHTML = '';
         messageInput.placeholder = t('placeholder.message');
     }
@@ -3997,7 +4123,7 @@ function updateToolResultBox(toolResult) {
         if (result.details && Array.isArray(result.details)) {
             resultHTML += '<ul class="tool-result-details">';
             for (const detail of result.details) {
-                resultHTML += `<li>${escapeHtml(detail)}</li>`;
+                resultHTML += `<li>${renderMarkdown(String(detail))}</li>`;
             }
             resultHTML += '</ul>';
         }
@@ -4233,6 +4359,14 @@ function openDetailPanel(planData) {
         const loadingText = planLoading.querySelector('.loading-text');
         if (loadingText) loadingText.textContent = t('status.executing_plan');
     }
+    
+    // Clear stale analysis/outputs from a previously viewed conversation
+    const planContent = document.getElementById('planContent');
+    if (planContent) planContent.innerHTML = '';
+    const regeneratePlan = document.getElementById('regeneratePlan');
+    if (regeneratePlan) regeneratePlan.style.display = 'none';
+    const outputsContent = document.getElementById('outputsContent');
+    if (outputsContent) outputsContent.innerHTML = '<div class="outputs-empty-state">' + t('empty.outputs_hint') + '</div>';
     
     // Create graph from plan data
     if (nodeGraph) {
@@ -4500,6 +4634,12 @@ function openDetailPanelFromSaved(planData) {
     detailPanelData.currentStep = detailPanelData.steps.length;
     
     showDetailPanelUI();
+    
+    // Hide loading indicator & clear stale content from a previously viewed conversation
+    const planLoading = document.getElementById('planLoading');
+    if (planLoading) planLoading.style.display = 'none';
+    const planContentEl = document.getElementById('planContent');
+    if (planContentEl) planContentEl.innerHTML = '';
     
     // Hide empty states, show content
     const planEmptyState = document.getElementById('planEmptyState');

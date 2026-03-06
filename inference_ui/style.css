@@ -2013,6 +2013,18 @@ html, body {
     box-shadow: var(--shadow-sm);
 }
 
+.modal-btn-danger {
+    background: #dc3545;
+    border: none;
+    color: white;
+}
+
+.modal-btn-danger:hover {
+    background: #c82333;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
 /* Settings Items */
 .setting-item {
     margin-bottom: 16px;
@@ -2406,6 +2418,18 @@ body,
     color: var(--text-color);
 }
 
+[data-theme="cyber-edge"] .modal-btn-danger {
+    background: #dc3545;
+    border: none;
+    color: white;
+    border-radius: 8px;
+}
+
+[data-theme="cyber-edge"] .modal-btn-danger:hover {
+    background: #c82333;
+    box-shadow: 0 0 12px rgba(220, 53, 69, 0.4);
+}
+
 /* Cyber Edge - Scrollbar */
 [data-theme="cyber-edge"] ::-webkit-scrollbar {
     width: 6px;
@@ -2588,27 +2612,18 @@ body,
 }
 
 .tool-result-details {
-    list-style: none;
-    padding: 0;
+    list-style: disc;
+    padding-left: 22px;
     margin: 8px 0;
 }
 
 .tool-result-details li {
-    padding: 6px 0;
-    padding-left: 20px;
-    position: relative;
+    padding: 4px 0;
     color: var(--text-secondary);
-    border-bottom: 1px solid var(--border-light);
+    line-height: 1.6;
 }
 
-.tool-result-details li:last-child {
-    border-bottom: none;
-}
-
-.tool-result-details li::before {
-    content: '•';
-    position: absolute;
-    left: 6px;
+.tool-result-details li::marker {
     color: var(--primary-color);
 }
 
@@ -2909,6 +2924,35 @@ body,
     opacity: 1;
 }
 
+.plan-goal-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.plan-regen-btn {
+    width: 20px;
+    height: 20px;
+    padding: 2px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 4px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    opacity: 0.5;
+    transition: all 0.2s ease;
+}
+
+.plan-regen-btn:hover {
+    opacity: 1;
+    color: var(--accent-primary);
+}
+
 /* Step result nested display */
 .plan-step .step-result {
     margin-top: 12px;
@@ -2950,6 +2994,99 @@ body,
 .step-result .result-text {
     color: var(--text-secondary);
     white-space: pre-wrap;
+}
+
+/* Rendered markdown hierarchy inside step-result */
+.step-result h1,
+.step-result h2 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-color);
+    margin: 14px 0 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.step-result h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-color);
+    margin: 10px 0 4px;
+}
+
+.step-result h1:first-child,
+.step-result h2:first-child,
+.step-result h3:first-child {
+    margin-top: 0;
+}
+
+.step-result p {
+    margin: 4px 0;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.step-result ul,
+.step-result ol {
+    padding-left: 20px;
+    margin: 4px 0;
+    color: var(--text-secondary);
+}
+
+.step-result li {
+    margin: 2px 0;
+    line-height: 1.6;
+}
+
+.step-result ul ul,
+.step-result ol ol,
+.step-result ul ol,
+.step-result ol ul {
+    padding-left: 18px;
+    margin: 2px 0;
+}
+
+.step-result blockquote {
+    border-left: 2px solid var(--border-color);
+    padding: 6px 12px;
+    margin: 8px 0;
+    background: var(--card-bg);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.step-result strong {
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.step-result code {
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 11.5px;
+    background: var(--bg-secondary);
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.step-result table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 12px;
+}
+
+.step-result th,
+.step-result td {
+    padding: 5px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.step-result th {
+    background: var(--card-bg);
+    font-weight: 500;
+    color: var(--text-secondary);
 }
 
 .tool-result-divider {
@@ -3391,13 +3528,17 @@ body,
 
 .result-details-minimal {
     margin: 4px 0 0 0;
-    padding-left: 16px;
+    padding-left: 20px;
     font-size: 13px;
     color: var(--text-secondary);
     line-height: 1.6;
+    list-style: disc;
 }
 .result-details-minimal li {
     margin-bottom: 4px;
+}
+.result-details-minimal li::marker {
+    color: var(--text-muted);
 }
 .result-details-minimal li:last-child {
     margin-bottom: 0;
@@ -3420,7 +3561,36 @@ body,
     font-size: 12px;
     color: var(--text-secondary);
     margin-top: 4px;
-    line-height: 1.4;
+    line-height: 1.5;
+}
+
+.step-brief-summary h1,
+.step-brief-summary h2,
+.step-brief-summary h3 {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-color);
+    margin: 8px 0 3px;
+}
+
+.step-brief-summary h1:first-child,
+.step-brief-summary h2:first-child,
+.step-brief-summary h3:first-child {
+    margin-top: 0;
+}
+
+.step-brief-summary p {
+    margin: 3px 0;
+}
+
+.step-brief-summary ul,
+.step-brief-summary ol {
+    padding-left: 18px;
+    margin: 3px 0;
+}
+
+.step-brief-summary li {
+    margin: 1px 0;
 }
 
 .step-more-detail-btn {
@@ -3797,16 +3967,16 @@ body,
 .detail-plan-content {
     flex: 1;
     overflow-y: auto;
-    line-height: 1.7;
+    line-height: 1.75;
+    font-size: 14px;
 }
 
 .detail-plan-content h2 {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 600;
-    color: var(--text-color);
-    margin: 20px 0 12px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    margin: 24px 0 10px;
+    letter-spacing: 0.02em;
 }
 
 .detail-plan-content h2:first-child {
@@ -3814,26 +3984,28 @@ body,
 }
 
 .detail-plan-content h3 {
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--text-color);
-    margin: 16px 0 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin: 18px 0 8px;
 }
 
 .detail-plan-content p {
     margin: 8px 0;
     color: var(--text-secondary);
+    font-size: 14px;
 }
 
 .detail-plan-content ul, 
 .detail-plan-content ol {
     margin: 8px 0;
-    padding-left: 24px;
+    padding-left: 20px;
     color: var(--text-secondary);
 }
 
 .detail-plan-content li {
-    margin: 4px 0;
+    margin: 3px 0;
+    font-size: 14px;
 }
 
 .detail-plan-content pre {
@@ -3842,12 +4014,11 @@ body,
     border-radius: var(--radius-sm);
     overflow-x: auto;
     margin: 12px 0;
-    border: 1px solid var(--border-color);
 }
 
 .detail-plan-content code {
     font-family: 'Fira Code', 'Consolas', monospace;
-    font-size: 13px;
+    font-size: 12.5px;
     background: var(--bg-secondary);
     color: var(--accent-primary);
     padding: 2px 6px;
@@ -3871,14 +4042,18 @@ body,
 
 .detail-plan-content hr {
     border: none;
-    border-top: 1px solid var(--border-color);
-    margin: 16px 0;
+    height: 1px;
+    background: var(--border-color);
+    opacity: 0.5;
+    margin: 20px 0;
 }
 
 .detail-plan-content blockquote {
-    border-left: 3px solid var(--accent-primary);
-    padding-left: 12px;
+    border-left: 2px solid var(--border-color);
+    background: var(--card-bg);
+    padding: 10px 14px;
     margin: 12px 0;
+    border-radius: var(--radius-sm);
     color: var(--text-muted);
 }
 
@@ -3894,19 +4069,24 @@ body,
 .detail-plan-content table {
     width: 100%;
     border-collapse: collapse;
-    margin: 12px 0;
+    margin: 14px 0;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
 }
 
 .detail-plan-content th,
 .detail-plan-content td {
-    border: 1px solid var(--border-color);
+    border: none;
+    border-bottom: 1px solid var(--border-color);
     padding: 8px 12px;
     text-align: left;
+    font-size: 13px;
 }
 
 .detail-plan-content th {
-    background: var(--bg-secondary);
-    font-weight: 600;
+    background: var(--card-bg);
+    font-weight: 500;
+    color: var(--text-secondary);
 }
 
 /* Code Tab */
@@ -3950,6 +4130,7 @@ body,
     padding: 40px 20px;
     color: var(--text-muted);
     font-size: 14px;
+    opacity: 0.6;
 }
 
 /* Code Block Styling (Simple CSS syntax highlight) */
@@ -4181,6 +4362,16 @@ body,
     display: inline;
 }
 
+/* Prevent <p> inside <li> from adding unwanted margin in rendered markdown */
+.tool-result-details li p,
+.output-details li p,
+.output-content li p,
+.output-summary li p,
+.step-result li p {
+    margin: 0;
+    display: inline;
+}
+
 /* Outputs Tab */
 .detail-outputs-content {
     flex: 1;
@@ -4188,90 +4379,220 @@ body,
 }
 
 .output-step-section {
-    margin-bottom: 24px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 12px;
+    padding: 16px;
+    background: var(--card-bg);
+    border-radius: var(--radius-md);
 }
 
 .output-step-section:last-child {
-    border-bottom: none;
     margin-bottom: 0;
 }
 
 .output-step-header {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-light);
+    gap: 8px;
+    margin-bottom: 10px;
 }
 
 .output-step-number {
-    width: 28px;
-    height: 28px;
-    background: var(--primary-color);
-    color: white;
+    width: 22px;
+    height: 22px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     flex-shrink: 0;
 }
 
 .output-step-title {
     flex: 1;
-    font-weight: 600;
+    font-weight: 500;
+    font-size: 14px;
     color: var(--text-color);
 }
 
 .output-step-tool {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-muted);
     font-family: 'Fira Code', monospace;
+    background: var(--bg-secondary);
+    padding: 2px 6px;
+    border-radius: 3px;
 }
 
 .output-content {
-    padding: 0 0 0 38px;
+    padding: 0;
 }
 
 .output-title {
     font-weight: 500;
+    font-size: 14px;
     color: var(--text-color);
     margin-bottom: 8px;
 }
 
 .output-details {
-    margin: 12px 0;
-    padding-left: 0;
-    list-style: none;
+    margin: 8px 0;
+    padding-left: 22px;
+    list-style: disc;
 }
 
 .output-details li {
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border-light);
+    padding: 3px 0;
     color: var(--text-secondary);
-    font-size: 14px;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.output-details li::marker {
+    color: var(--text-muted);
 }
 
 .output-details li:last-child {
-    border-bottom: none;
+    padding-bottom: 0;
 }
 
 .output-summary {
-    margin: 12px 0 0;
-    font-style: italic;
+    margin: 16px 0 0;
+    font-style: normal;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+/* Rendered markdown hierarchy inside output-content and output-summary */
+.output-content h1,
+.output-content h2,
+.output-summary h1,
+.output-summary h2 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-color);
+    margin: 14px 0 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.output-content h3,
+.output-summary h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-color);
+    margin: 10px 0 4px;
+}
+
+.output-content h1:first-child,
+.output-content h2:first-child,
+.output-content h3:first-child,
+.output-summary h1:first-child,
+.output-summary h2:first-child,
+.output-summary h3:first-child {
+    margin-top: 0;
+}
+
+.output-content p,
+.output-summary p {
+    margin: 5px 0;
+    line-height: 1.7;
+}
+
+.output-content ul,
+.output-content ol,
+.output-summary ul,
+.output-summary ol {
+    padding-left: 22px;
+    margin: 6px 0;
+}
+
+.output-content li,
+.output-summary li {
+    margin: 3px 0;
+    line-height: 1.6;
+}
+
+.output-content ul ul,
+.output-content ol ol,
+.output-content ul ol,
+.output-content ol ul,
+.output-summary ul ul,
+.output-summary ol ol,
+.output-summary ul ol,
+.output-summary ol ul {
+    padding-left: 18px;
+    margin: 2px 0;
+}
+
+.output-content blockquote,
+.output-summary blockquote {
+    border-left: 2px solid var(--border-color);
+    padding: 8px 12px;
+    margin: 8px 0;
+    background: var(--card-bg);
+    border-radius: var(--radius-sm);
     color: var(--text-muted);
+    font-size: 12px;
+}
+
+.output-content strong,
+.output-summary strong {
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.output-content code,
+.output-summary code {
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 11.5px;
+    background: var(--bg-secondary);
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.output-summary code {
+    background: var(--card-bg);
+}
+
+.output-content table,
+.output-summary table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 12px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.output-content th,
+.output-content td,
+.output-summary th,
+.output-summary td {
+    padding: 5px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.output-content th,
+.output-summary th {
+    background: var(--card-bg);
+    font-weight: 500;
+    color: var(--text-secondary);
 }
 
 .output-error {
     color: #ef4444;
     background: rgba(239, 68, 68, 0.08);
-    border-left: 3px solid #ef4444;
+    border-left: 2px solid #ef4444;
     padding: 8px 12px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-size: 13px;
     margin: 8px 0;
 }
@@ -4289,19 +4610,22 @@ body,
     border-collapse: collapse;
     margin: 12px 0;
     font-size: 13px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
 }
 
 .output-table th,
 .output-table td {
     padding: 8px 12px;
     text-align: left;
-    border: 1px solid var(--border-color);
+    border: none;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .output-table th {
     background: var(--bg-secondary);
-    font-weight: 600;
-    color: var(--text-color);
+    font-weight: 500;
+    color: var(--text-secondary);
 }
 
 .output-table td {
