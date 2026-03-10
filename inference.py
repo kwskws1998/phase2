@@ -2276,21 +2276,28 @@ class InferenceChatHandler(BaseHTTPRequestHandler):
         self.send_json(result)
 
     def handle_step_question(self, data):
-        """Handle question about a specific step - stream LLM response."""
+        """Handle question about specific step(s) - stream LLM response."""
         global global_model, global_tokenizer, global_args
         
         conv_id = data.get('conv_id')
-        step_num = data.get('step_num')
-        tool = data.get('tool', '')
-        step_name = data.get('step_name', '')
-        step_context = data.get('step_context', '')
-        previous_steps = data.get('previous_steps', [])
         plan_goal = data.get('plan_goal', '')
         plan_steps = data.get('plan_steps', [])
         question = data.get('question', '').strip()
         
+        # Support multi-step tags (new format) with backward compatibility
+        steps_data = data.get('steps', [])
+        if not steps_data and data.get('step_num') is not None:
+            steps_data = [{
+                'step_num': data.get('step_num'),
+                'tool': data.get('tool', ''),
+                'step_name': data.get('step_name', ''),
+                'step_context': data.get('step_context', ''),
+                'previous_steps': data.get('previous_steps', [])
+            }]
+        
+        tagged_nums = [s.get('step_num') for s in steps_data]
         print(f"[step_question] Received question: {question}")
-        print(f"[step_question] Step {step_num}: {step_name}")
+        print(f"[step_question] Tagged steps: {tagged_nums}")
         
         if not question:
             self.send_error_json('Question is required', 400)
@@ -2305,39 +2312,46 @@ class InferenceChatHandler(BaseHTTPRequestHandler):
         if not conv:
             conv = conversation_manager.create_conversation(conv_id.split('_')[0] if conv_id else 'chat')
         
-        # Save user question to history
-        user_content = f"[Step {step_num} Question] {question}"
+        tag_label = ', '.join(f'Step {n}' if n != 0 else 'Plan' for n in tagged_nums)
+        user_content = f"[{tag_label} Question] {question}"
         conv['messages'].append({'role': 'user', 'content': user_content})
         user_index = len(conv['messages']) - 1
         conversation_manager.save_conversation(conv_id, conv)
         
-        # Build plan structure context
+        # Build plan structure context (mark tagged steps with arrow)
+        tagged_set = set(tagged_nums)
         plan_structure = ""
         if plan_goal:
             plan_structure = f"=== Research Plan ===\nGoal: {plan_goal}\n\nAll Steps:\n"
             for ps in plan_steps:
-                marker = "→" if ps.get('num') == step_num else " "
+                marker = "→" if ps.get('num') in tagged_set else " "
                 plan_structure += f"{marker} Step {ps.get('num')}: {ps.get('name')} ({ps.get('tool')})\n"
             plan_structure += "\n"
         
-        # Build previous steps context
-        previous_steps_context = ""
-        if previous_steps:
-            previous_steps_context = "=== Previous Step Results ===\n"
-            for prev in previous_steps:
-                prev_result = prev.get('result', '')[:500]  # Limit each step result
-                previous_steps_context += f"Step {prev.get('num')}: {prev.get('name')}\nResult: {prev_result}\n\n"
+        # Build tagged steps context
+        tagged_context = "=== Tagged Steps (Question Targets) ===\n"
+        for s in steps_data:
+            snum = s.get('step_num')
+            sname = s.get('step_name', '')
+            stool = s.get('tool', '')
+            sctx = s.get('step_context', '')[:2000]
+            if snum == 0:
+                tagged_context += "[Entire Plan]\n\n"
+            else:
+                tagged_context += f"Step {snum}: {sname} (tool: {stool})\nResult:\n{sctx}\n\n"
+            # Include previous steps for this tagged step
+            prev_steps = s.get('previous_steps', [])
+            if prev_steps:
+                tagged_context += "Previous steps:\n"
+                for prev in prev_steps:
+                    prev_result = prev.get('result', '')[:500]
+                    tagged_context += f"  Step {prev.get('num')}: {prev.get('name')} -> {prev_result[:200]}\n"
+                tagged_context += "\n"
         
-        # Build prompt with plan and step context
-        system_prompt = f"""You are a helpful research assistant. Answer questions about specific research steps.
+        system_prompt = f"""You are a helpful research assistant. Answer questions about the tagged research steps.
 
-{plan_structure}{previous_steps_context}=== Current Step (Question Target) ===
-Step {step_num}: {step_name} (tool: {tool})
-
-Current Step Result:
-{step_context[:2000]}
-
-Refer to the research plan and context above to answer the user's question concisely and helpfully.
+{plan_structure}{tagged_context}
+Refer to the research plan and tagged step contexts above to answer the user's question concisely and helpfully.
 You may suggest plan modifications or new steps if needed."""
         
         # Set up SSE streaming

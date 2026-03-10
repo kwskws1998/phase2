@@ -388,6 +388,13 @@ def run_training(args):
             logging_dir=os.path.join(final_output_dir, 'logs'),
             remove_unused_columns=False,
             report_to="none",
+            optim=args.optim,
+            adam_beta1=args.adam_beta1,
+            adam_beta2=args.adam_beta2,
+            weight_decay=args.weight_decay,
+            warmup_steps=args.warmup_steps,
+            warmup_ratio=args.warmup_ratio,
+            lr_scheduler_type=args.lr_scheduler_type,
             **eval_kwargs,
             **dtype_kwargs
         )
@@ -564,7 +571,24 @@ if __name__ == "__main__":
                         help="Save checkpoint every X updates steps.")
     
     parser.add_argument("--logging_steps", type=int, default=10, help="Log metrics every N steps")
-    
+
+    # Optimizer & Scheduler Arguments
+    parser.add_argument("--optim", type=str, default="adamw_torch",
+                        help="Optimizer type (adamw_torch, adam_torch, sgd, adafactor, etc.). Default: adamw_torch")
+    parser.add_argument("--adam_beta1", type=float, default=0.9,
+                        help="Adam/AdamW beta1. Default: 0.9")
+    parser.add_argument("--adam_beta2", type=float, default=0.999,
+                        help="Adam/AdamW beta2. Default: 0.999")
+    parser.add_argument("--weight_decay", type=float, default=0.0,
+                        help="Weight decay for optimizer. Default: 0.0")
+    parser.add_argument("--warmup_steps", type=int, default=0,
+                        help="Number of warmup steps. Overridden by warmup_ratio if > 0. Default: 0")
+    parser.add_argument("--warmup_ratio", type=float, default=0.0,
+                        help="Warmup ratio (0.0-1.0). Takes precedence over warmup_steps. Default: 0.0")
+    parser.add_argument("--lr_scheduler_type", type=str, default="cosine",
+                        help="LR scheduler: linear, cosine, cosine_with_restarts, polynomial, "
+                             "constant, constant_with_warmup. Default: cosine")
+
     # Loss Type Argument
     parser.add_argument("--loss_type", type=str, default="cross_entropy", 
                         help="Type of loss function to use (defined in loss.py)")

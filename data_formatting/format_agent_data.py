@@ -7,6 +7,8 @@ into training-ready format with:
   - Role mapping:   system -> system, human -> user, LLM -> assistant, Result -> tool
   - Error filtering: removes instances with status="error", empty final_answer,
                      or empty LLM content turns
+  - Phase splitting: multi-phase conversations (multiple system prompts) are
+                     split into separate training instances
   - Output:         JSON array with {"messages": [...]} per instance
 
 Usage:
@@ -49,10 +51,39 @@ def convert_tags(text: str) -> str:
     return TAG_PATTERN.sub(lambda m: TAG_MAP[m.group(0).lower()], text)
 
 
-def convert_instance(instance: dict) -> dict | None:
+def split_by_system_prompt(messages: list[dict]) -> list[list[dict]]:
+    """Split messages into phases whenever a new system prompt appears.
+
+    Each phase starts with a system message and contains the subsequent
+    user/assistant/tool messages until the next system message.
+    System prompts do NOT accumulate across phases.
+
+    Returns:
+        List of message lists, one per phase.
+    """
+    phases = []
+    current_phase = []
+
+    for msg in messages:
+        if msg["role"] == "system" and current_phase:
+            phases.append(current_phase)
+            current_phase = [msg]
+        else:
+            current_phase.append(msg)
+
+    if current_phase:
+        phases.append(current_phase)
+
+    return phases
+
+
+def convert_instance(instance: dict) -> list[dict] | None:
     """Convert a single raw instance to training format.
 
-    Returns None if the instance should be filtered out.
+    If the conversation contains multiple system prompts (multi-phase),
+    each phase is split into a separate training instance.
+
+    Returns list of converted instances, or None if filtered out.
     """
     if instance.get("status") == "error":
         return None
@@ -85,12 +116,20 @@ def convert_instance(instance: dict) -> dict | None:
     if len(messages) < 2:
         return None
 
-    result = {
-        "instance_id": instance.get("instance_id"),
-        "task_instance_id": instance.get("task_instance_id"),
-        "messages": messages,
-    }
-    return result
+    phases = split_by_system_prompt(messages)
+
+    results = []
+    for i, phase_messages in enumerate(phases):
+        if len(phase_messages) < 2:
+            continue
+        results.append({
+            "instance_id": instance.get("instance_id"),
+            "task_instance_id": instance.get("task_instance_id"),
+            "phase": i,
+            "messages": phase_messages,
+        })
+
+    return results if results else None
 
 
 def main():
@@ -122,14 +161,19 @@ def main():
 
     converted = []
     skipped = 0
+    multi_phase_count = 0
     for inst in all_instances:
         result = convert_instance(inst)
         if result is not None:
-            converted.append(result)
+            converted.extend(result)
+            if len(result) > 1:
+                multi_phase_count += 1
         else:
             skipped += 1
 
-    print(f"Converted: {len(converted)}, Filtered out: {skipped}")
+    print(f"Converted: {len(converted)} instances, Filtered out: {skipped}")
+    if multi_phase_count:
+        print(f"  (includes {multi_phase_count} multi-phase conversations split into separate instances)")
 
     if not converted:
         print("No instances remaining after filtering. Exiting.")

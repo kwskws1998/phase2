@@ -115,12 +115,17 @@ class AgentDataset(Dataset):
             final_assistant_content
             </s>
 
+        If multiple system messages appear, <s> (BOS) is only added once
+        at the very beginning. Subsequent system messages use
+        [SYSTEM_PROMPT]...[/SYSTEM_PROMPT] without an extra BOS.
+
         Returns:
             (input_ids, boundaries)
             boundaries: list of (start, end, role) tuples
         """
         input_ids = []
         boundaries = []
+        has_bos = False
 
         for msg in messages:
             role = msg["role"]
@@ -128,7 +133,9 @@ class AgentDataset(Dataset):
             start = len(input_ids)
 
             if role == "system":
-                input_ids.append(self.bos_id)
+                if not has_bos:
+                    input_ids.append(self.bos_id)
+                    has_bos = True
                 input_ids.append(self.sys_start_id)
                 input_ids.extend(self._encode_text(content))
                 input_ids.append(self.sys_end_id)
