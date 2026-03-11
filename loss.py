@@ -73,7 +73,7 @@ def compute_cross_entropy_loss(model, inputs, trainer_context) -> LossResult:
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
         
-        loss_fct = nn.CrossEntropyLoss()
+        loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
         loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
         return LossResult(
             total_loss=loss,

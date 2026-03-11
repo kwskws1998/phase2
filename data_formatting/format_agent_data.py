@@ -5,6 +5,9 @@ Converts raw agent results (train_biological_casuality_*_results_*.json)
 into training-ready format with:
   - Tag conversion: <think> -> [THINK], <execute> -> [EXECUTE], etc.
   - Role mapping:   system -> system, human -> user, LLM -> assistant, Result -> tool
+  - Tool retrieval: tool_retrieval -> system (content from template),
+                    Result after tool_retrieval -> assistant (LLM's tool selection)
+  - Bad message filtering: removes [LOOP TRUNCATED] and System Alert messages
   - Error filtering: removes instances with status="error", empty final_answer,
                      or empty LLM content turns
   - Phase splitting: multi-phase conversations (multiple system prompts) are
@@ -13,6 +16,11 @@ into training-ready format with:
 
 Usage:
     python data_formatting/format_agent_data.py input1.json [input2.json ...] -o output.json
+
+    # With tool retrieval template:
+    python data_formatting/format_agent_data.py results.json -o output.json \\
+        --tool-retrieval-template tool_retrieval_sys_prompt.txt \\
+        --source-data train_biological_causality_1000_no_pharma.json
 """
 
 import argparse
@@ -39,16 +47,27 @@ TAG_PATTERN = re.compile(
 )
 
 ROLE_MAP = {
-    "system":  "system",
-    "human":   "user",
-    "LLM":     "assistant",
-    "Result":  "tool",
+    "system":          "system",
+    "human":           "user",
+    "LLM":             "assistant",
+    "Result":          "tool",
+    "tool_retrieval":  "system",
 }
+
+FILTER_PATTERNS = [
+    "[LOOP TRUNCATED]",
+    "System Alert: Infinite loop detected",
+]
 
 
 def convert_tags(text: str) -> str:
     """Replace agent-specific XML tags with Ministral bracket tokens."""
     return TAG_PATTERN.sub(lambda m: TAG_MAP[m.group(0).lower()], text)
+
+
+def should_skip_message(content: str) -> bool:
+    """Check if a message contains patterns that should be filtered out."""
+    return any(pattern in content for pattern in FILTER_PATTERNS)
 
 
 def split_by_system_prompt(messages: list[dict]) -> list[list[dict]]:
@@ -77,11 +96,20 @@ def split_by_system_prompt(messages: list[dict]) -> list[list[dict]]:
     return phases
 
 
-def convert_instance(instance: dict) -> list[dict] | None:
+def convert_instance(
+    instance: dict,
+    tr_template: str | None = None,
+    source_prompts: dict | None = None,
+) -> list[dict] | None:
     """Convert a single raw instance to training format.
 
     If the conversation contains multiple system prompts (multi-phase),
     each phase is split into a separate training instance.
+
+    Args:
+        instance: Raw agent result dict.
+        tr_template: Tool retrieval system prompt template (optional).
+        source_prompts: {instance_id: prompt} mapping for USER QUERY (optional).
 
     Returns list of converted instances, or None if filtered out.
     """
@@ -96,38 +124,81 @@ def convert_instance(instance: dict) -> list[dict] | None:
     if not raw_messages:
         return None
 
-    messages = []
+    instance_id = instance.get("instance_id")
+
+    # Separate tool_retrieval phase from the rest.
+    # Raw message order: [system] → [tool_retrieval] → [Result] → [human] → [LLM] → ...
+    # We extract tool_retrieval + its Result as Phase 0,
+    # then process remaining messages as Phase 1+.
+    tool_retrieval_phase = []  # Phase 0: system(tool_retrieval) + assistant(Result)
+    remaining_messages = []    # Phase 1+: system(agent) + user + assistant + tool + ...
+
+    prev_raw_type = None
     for msg in raw_messages:
         raw_type = msg.get("type", "")
         role = ROLE_MAP.get(raw_type)
         if role is None:
+            prev_raw_type = raw_type
             continue
 
         content = msg.get("content", "")
         if not isinstance(content, str):
             content = str(content)
 
+        # Filter out bad messages
+        if should_skip_message(content):
+            prev_raw_type = raw_type
+            continue
+
+        # tool_retrieval → Phase 0 system prompt
+        if raw_type == "tool_retrieval":
+            if tr_template and source_prompts and instance_id in source_prompts:
+                content = tr_template.replace("{User prompt}", source_prompts[instance_id])
+            content = convert_tags(content)
+            tool_retrieval_phase.append({"role": "system", "content": content})
+            prev_raw_type = raw_type
+            continue
+
+        # Result right after tool_retrieval → Phase 0 assistant
+        if raw_type == "Result" and prev_raw_type == "tool_retrieval":
+            content = convert_tags(content)
+            tool_retrieval_phase.append({"role": "assistant", "content": content})
+            prev_raw_type = raw_type
+            continue
+
+        # Everything else → remaining messages
         if role == "assistant" and not content.strip():
+            prev_raw_type = raw_type
             continue
 
         content = convert_tags(content)
-        messages.append({"role": role, "content": content})
+        remaining_messages.append({"role": role, "content": content})
+        prev_raw_type = raw_type
 
-    if len(messages) < 2:
-        return None
-
-    phases = split_by_system_prompt(messages)
-
+    # Build results: Phase 0 (tool retrieval) + Phase 1+ (agent reasoning)
     results = []
-    for i, phase_messages in enumerate(phases):
-        if len(phase_messages) < 2:
-            continue
+    task_instance_id = instance.get("task_instance_id")
+
+    if len(tool_retrieval_phase) >= 2:
         results.append({
-            "instance_id": instance.get("instance_id"),
-            "task_instance_id": instance.get("task_instance_id"),
-            "phase": i,
-            "messages": phase_messages,
+            "instance_id": instance_id,
+            "task_instance_id": task_instance_id,
+            "phase": 0,
+            "messages": tool_retrieval_phase,
         })
+
+    # Split remaining by system prompt (in case of further phase changes)
+    if len(remaining_messages) >= 2:
+        phases = split_by_system_prompt(remaining_messages)
+        for i, phase_messages in enumerate(phases):
+            if len(phase_messages) < 2:
+                continue
+            results.append({
+                "instance_id": instance_id,
+                "task_instance_id": task_instance_id,
+                "phase": len(results),
+                "messages": phase_messages,
+            })
 
     return results if results else None
 
@@ -144,7 +215,30 @@ def main():
         "-o", "--output", required=True,
         help="Output JSON file path",
     )
+    parser.add_argument(
+        "--tool-retrieval-template", type=str, default=None,
+        help="Path to tool_retrieval_sys_prompt.txt template file",
+    )
+    parser.add_argument(
+        "--source-data", type=str, default=None,
+        help="Path to source data JSON (for USER QUERY lookup by instance_id)",
+    )
     args = parser.parse_args()
+
+    # Load tool retrieval template
+    tr_template = None
+    if args.tool_retrieval_template:
+        with open(args.tool_retrieval_template, "r", encoding="utf-8") as f:
+            tr_template = f.read()
+        print(f"Loaded tool retrieval template: {args.tool_retrieval_template}")
+
+    # Load source data for USER QUERY mapping
+    source_prompts = {}
+    if args.source_data:
+        with open(args.source_data, "r", encoding="utf-8") as f:
+            for item in json.load(f):
+                source_prompts[item["instance_id"]] = item["prompt"]
+        print(f"Loaded {len(source_prompts)} source prompts from {args.source_data}")
 
     all_instances = []
     for path in args.inputs:
@@ -163,7 +257,7 @@ def main():
     skipped = 0
     multi_phase_count = 0
     for inst in all_instances:
-        result = convert_instance(inst)
+        result = convert_instance(inst, tr_template, source_prompts)
         if result is not None:
             converted.extend(result)
             if len(result) > 1:

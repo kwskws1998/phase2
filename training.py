@@ -300,6 +300,12 @@ def run_training(args):
                     output.requires_grad_(True)
                 model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
         
+        # Auto-download data if not found
+        if args.data_path:
+            from utils.data_download import ensure_data
+            from utils.paths import get_data_dir
+            args.data_path = ensure_data(args.data_path, data_dir=get_data_dir())
+
         # Load Dataset using custom module (now returns tuple)
         train_dataset, eval_dataset = dataset_module.get_dataset(args, tokenizer)
         
@@ -542,6 +548,8 @@ if __name__ == "__main__":
                         help="Number of training epochs. Default: 1")
     parser.add_argument("--batch_size", type=int, default=2,
                         help="Training batch size per device. Default: 2")
+    parser.add_argument("--max_length", type=int, default=4096,
+                        help="Maximum sequence length for tokenization. Default: 4096")
     parser.add_argument("--learning_rate", type=float, default=2e-5,
                         help="Learning rate for optimizer. Default: 2e-5")
     parser.add_argument("--data_path", type=str, default=None,
