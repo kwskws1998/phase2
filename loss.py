@@ -119,13 +119,14 @@ def heteroscedastic_uncertainty_loss(model, inputs, trainer_context) -> LossResu
     if log_variance is None:
         raise ValueError("Model does not output log_variance. Use a heteroscedastic model architecture.")
     
-    # Shift for next-token prediction — cast to model dtype to prevent float32 OOM
-    compute_dtype = next(model.parameters()).dtype  # bf16/fp16 등 인자 따라 결정
-    shift_logits = logits[..., :-1, :].to(compute_dtype).contiguous()
+    # Shift for next-token prediction
+    shift_logits = logits[..., :-1, :].contiguous()
     shift_labels = labels[..., 1:].contiguous()
-    shift_log_var = log_variance[..., :-1, :].to(compute_dtype).contiguous()
+    shift_log_var = log_variance[..., :-1, :].contiguous()
 
-    # Free original tensors to reclaim VRAM before MC sampling
+    # Free original tensors before MC sampling to reclaim VRAM
+    # shift_logits/shift_log_var are independent copies (.contiguous()), so this is safe
+    # Saves ~10.7 GB (the original logits tensor held by outputs)
     del logits, log_variance, outputs
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -165,7 +166,7 @@ def heteroscedastic_uncertainty_loss(model, inputs, trainer_context) -> LossResu
             "variance_mean": sigma_stats["variance_mean"],
             "log_variance_mean": sigma_stats["log_variance_mean"],
         },
-        outputs=outputs
+        outputs=None  # outputs freed before MC sampling for VRAM efficiency
     )
 
 

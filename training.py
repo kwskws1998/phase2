@@ -380,6 +380,18 @@ def run_training(args):
                 if args.save_strategy == "no" and args.early_stopping_patience > 0:
                     print(f"[DEBUG] Warning: load_best_model_at_end disabled because save_strategy='no'")
 
+        # FSDP configuration (Fully Sharded Data Parallel)
+        # Shards model weights, optimizer states, and gradients across GPUs.
+        # Requires torchrun launch: CUDA_VISIBLE_DEVICES=6,7 torchrun --nproc_per_node=2 training.py --fsdp
+        fsdp_kwargs = {}
+        if args.fsdp:
+            fsdp_kwargs["fsdp"] = "full_shard auto_wrap"
+            fsdp_kwargs["fsdp_config"] = {
+                "transformer_layer_cls_to_wrap": "Mistral3DecoderLayer",
+            }
+            if args.debug:
+                print(f"[DEBUG] FSDP enabled: full_shard auto_wrap, wrapping Mistral3DecoderLayer")
+
         # Training Arguments
         # We strictly use the arguments provided by the user + dynamic precision flags.
         training_args = TrainingArguments(
@@ -402,7 +414,8 @@ def run_training(args):
             warmup_ratio=args.warmup_ratio,
             lr_scheduler_type=args.lr_scheduler_type,
             **eval_kwargs,
-            **dtype_kwargs
+            **dtype_kwargs,
+            **fsdp_kwargs
         )
 
         if args.loss_type == "gdpo" or args.loss_type == "heteroscedastic_gdpo":
@@ -664,7 +677,13 @@ if __name__ == "__main__":
                         help="Weight for heteroscedastic loss term in heteroscedastic_gdpo (default: 0.1)")
     parser.add_argument("--heteroscedastic_sequential", action="store_true",
                         help="Use sequential MC sampling for lower memory (slower)")
-    
+
+    # Distributed Training
+    parser.add_argument("--fsdp", action="store_true",
+                        help="Enable FSDP (Fully Sharded Data Parallel) for multi-GPU memory optimization. "
+                             "Shards model weights, optimizer states, and gradients across GPUs. "
+                             "Requires torchrun launch.")
+
     # Training Stability
     parser.add_argument("--random_seed", type=int, default=-1,
                         help="Random seed (-1 for random, positive for fixed seed)")
