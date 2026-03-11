@@ -119,11 +119,17 @@ def heteroscedastic_uncertainty_loss(model, inputs, trainer_context) -> LossResu
     if log_variance is None:
         raise ValueError("Model does not output log_variance. Use a heteroscedastic model architecture.")
     
-    # Shift for next-token prediction
-    shift_logits = logits[..., :-1, :].contiguous()
+    # Shift for next-token prediction — cast to model dtype to prevent float32 OOM
+    compute_dtype = next(model.parameters()).dtype  # bf16/fp16 등 인자 따라 결정
+    shift_logits = logits[..., :-1, :].to(compute_dtype).contiguous()
     shift_labels = labels[..., 1:].contiguous()
-    shift_log_var = log_variance[..., :-1, :].contiguous()
-    
+    shift_log_var = log_variance[..., :-1, :].to(compute_dtype).contiguous()
+
+    # Free original tensors to reclaim VRAM before MC sampling
+    del logits, log_variance, outputs
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     # Monte Carlo log probs with LEARNED σ
     log_probs, sigma_stats = compute_learned_heteroscedastic_log_probs(
         shift_logits, shift_log_var, shift_labels, T=T, sequential=sequential

@@ -289,24 +289,29 @@ def _compute_learned_heteroscedastic_sequential(logits, log_variance, labels, T)
     Sequential Monte Carlo sampling for learned sigma - processes one sample at a time.
     Memory-efficient but slower. Uses single-sample gradient estimation.
     """
+    # Ensure consistent dtype from model (prevents float32 OOM with large vocab)
+    compute_dtype = logits.dtype  # 모델에서 나온 dtype (bf16/fp16 등)
+    logits = logits.to(compute_dtype)
+    log_variance = log_variance.to(compute_dtype)
+
     batch_size, seq_len, vocab_size = logits.shape
-    
+
     # σ_i = exp(s_i / 2) where s_i = log(σ²_i) is learned from model
     sigma = torch.exp(log_variance / 2)  # (batch, seq_len, 1)
-    
+
     # Handle -100 labels for gather (temporary replacement)
     labels_safe = labels.clone()
     labels_safe[labels == -100] = 0
     labels_idx = labels_safe.unsqueeze(-1)  # (batch, seq_len, 1)
-    
+
     # Monte Carlo sampling: Σ_t softmax(f + σ*ε)[c]
-    prob_sum = torch.zeros(batch_size, seq_len, device=logits.device, dtype=logits.dtype)
-    
+    prob_sum = torch.zeros(batch_size, seq_len, device=logits.device, dtype=compute_dtype)
+
     for t in range(T):
         # Generate noise: ε_t is per-vocab (independent noise for each class)
         with torch.no_grad():
             epsilon_t = torch.randn(batch_size, seq_len, vocab_size,
-                                    device=logits.device, dtype=logits.dtype)
+                                    device=logits.device, dtype=compute_dtype)
         
         # x_hat = f + σ*ε_t
         # Gradients flow through BOTH logits AND sigma (log_variance)
