@@ -226,9 +226,11 @@ def _compute_learned_heteroscedastic_parallel(logits, log_variance, labels, T):
     Faster but uses T times more memory.
     """
     batch_size, seq_len, vocab_size = logits.shape
-    
+    compute_dtype = logits.dtype
+
     # σ_i = exp(s_i / 2) where s_i = log(σ²_i) is learned from model
-    sigma = torch.exp(log_variance / 2)  # (batch, seq_len, 1)
+    # NOTE: torch.exp is promoted to float32 by autocast → must cast back explicitly
+    sigma = torch.exp(log_variance / 2).to(compute_dtype)  # (batch, seq_len, 1)
     
     # Handle -100 labels for gather (temporary replacement)
     labels_safe = labels.clone()
@@ -258,20 +260,22 @@ def _compute_learned_heteroscedastic_parallel(logits, log_variance, labels, T):
     del x_hat
     
     # prob_c = softmax(x_hat)_c: (T, batch, seq_len)
-    prob_c = torch.exp(x_c - log_sum_exp).squeeze(-1)
+    # NOTE: exp promoted to float32 by autocast → cast back
+    prob_c = torch.exp(x_c - log_sum_exp).to(compute_dtype).squeeze(-1)
     del x_c, log_sum_exp
-    
+
     # Average over T samples: (batch, seq_len)
     avg_prob = prob_c.mean(dim=0)
     del prob_c
-    
+
     # log(avg_prob) with numerical stability
     log_probs = torch.log(avg_prob.clamp(min=1e-10))
-    
-    # Compute sigma statistics for logging
-    sigma_squeezed = sigma.squeeze(-1)
-    variance = torch.exp(log_variance.squeeze(-1))  # σ²
-    
+
+    # Compute sigma statistics for logging (detached, no grad needed)
+    with torch.no_grad():
+        sigma_squeezed = sigma.squeeze(-1)
+        variance = torch.exp(log_variance.squeeze(-1))  # σ²
+
     sigma_stats = {
         "sigma_mean": sigma_squeezed.mean().item(),
         "sigma_std": sigma_squeezed.std().item(),
@@ -280,7 +284,7 @@ def _compute_learned_heteroscedastic_parallel(logits, log_variance, labels, T):
         "variance_mean": variance.mean().item(),
         "log_variance_mean": log_variance.squeeze(-1).mean().item(),
     }
-    
+
     return log_probs, sigma_stats
 
 
@@ -297,7 +301,8 @@ def _compute_learned_heteroscedastic_sequential(logits, log_variance, labels, T)
     batch_size, seq_len, vocab_size = logits.shape
 
     # σ_i = exp(s_i / 2) where s_i = log(σ²_i) is learned from model
-    sigma = torch.exp(log_variance / 2)  # (batch, seq_len, 1)
+    # NOTE: torch.exp is promoted to float32 by autocast → must cast back explicitly
+    sigma = torch.exp(log_variance / 2).to(compute_dtype)  # (batch, seq_len, 1)
 
     # Handle -100 labels for gather (temporary replacement)
     labels_safe = labels.clone()
@@ -312,19 +317,22 @@ def _compute_learned_heteroscedastic_sequential(logits, log_variance, labels, T)
         with torch.no_grad():
             epsilon_t = torch.randn(batch_size, seq_len, vocab_size,
                                     device=logits.device, dtype=compute_dtype)
-        
-        # x_hat = f + σ*ε_t
+
+        # x_hat = f + σ*ε_t (split to reduce peak memory: del epsilon_t before allocating x_hat)
         # Gradients flow through BOTH logits AND sigma (log_variance)
-        x_hat = logits + sigma * epsilon_t
+        noise = sigma * epsilon_t
         del epsilon_t
-        
+        x_hat = logits + noise
+        del noise
+
         # Use logsumexp for memory efficiency
-        log_sum_exp = torch.logsumexp(x_hat, dim=-1, keepdim=True)
+        # NOTE: logsumexp/exp also promoted to fp32 by autocast → cast back
+        log_sum_exp = torch.logsumexp(x_hat, dim=-1, keepdim=True).to(compute_dtype)
         x_c = x_hat.gather(dim=-1, index=labels_idx)
         del x_hat
-        
+
         # prob_c = softmax(x_hat)_c
-        prob_c = torch.exp(x_c - log_sum_exp).squeeze(-1)
+        prob_c = torch.exp(x_c - log_sum_exp).to(compute_dtype).squeeze(-1)
         del x_c, log_sum_exp
         
         # Accumulate - detach all but last sample for memory efficiency
@@ -344,10 +352,11 @@ def _compute_learned_heteroscedastic_sequential(logits, log_variance, labels, T)
     # log(avg_prob) with numerical stability
     log_probs = torch.log(avg_prob.clamp(min=1e-10))
     
-    # Compute sigma statistics for logging
-    sigma_squeezed = sigma.squeeze(-1)
-    variance = torch.exp(log_variance.squeeze(-1))  # σ²
-    
+    # Compute sigma statistics for logging (detached, no grad needed)
+    with torch.no_grad():
+        sigma_squeezed = sigma.squeeze(-1)
+        variance = torch.exp(log_variance.squeeze(-1))  # σ²
+
     sigma_stats = {
         "sigma_mean": sigma_squeezed.mean().item(),
         "sigma_std": sigma_squeezed.std().item(),
@@ -356,5 +365,5 @@ def _compute_learned_heteroscedastic_sequential(logits, log_variance, labels, T)
         "variance_mean": variance.mean().item(),
         "log_variance_mean": log_variance.squeeze(-1).mean().item(),
     }
-    
+
     return log_probs, sigma_stats
