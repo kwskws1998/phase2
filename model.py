@@ -240,7 +240,9 @@ def get_model(args):
     
     print(f"[DEBUG] Quantization mode: {quantization}, Target dtype: {target_dtype}")
     
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # Use LOCAL_RANK for multi-GPU (torchrun/DDP/FSDP), default to cuda:0 for single GPU
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    device = f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu"
     
     # Initialize model directly on GPU to avoid CPU RAM spike
     print(f"[DEBUG] Initializing {model_type} with dtype: {target_dtype}")
