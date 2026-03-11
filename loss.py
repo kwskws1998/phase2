@@ -112,12 +112,22 @@ def heteroscedastic_uncertainty_loss(model, inputs, trainer_context) -> LossResu
     
     logits = outputs.logits  # (batch, seq_len, vocab_size)
     log_variance = outputs.log_variance  # (batch, seq_len, 1)
-    
+
     if logits is None or labels is None:
         raise ValueError("Could not compute heteroscedastic uncertainty loss: logits or labels missing.")
-    
+
     if log_variance is None:
         raise ValueError("Model does not output log_variance. Use a heteroscedastic model architecture.")
+
+    # Debug: log dtype and memory info (critical for diagnosing fp32 OOM)
+    if debug or logits.dtype == torch.float32:
+        import torch.cuda
+        tensor_gb = logits.nelement() * logits.element_size() / 1024**3
+        print(f"[LOSS] logits dtype: {logits.dtype}, shape: {logits.shape}, "
+              f"tensor size: {tensor_gb:.1f} GB")
+        if torch.cuda.is_available():
+            alloc_gb = torch.cuda.memory_allocated() / 1024**3
+            print(f"[LOSS] CUDA allocated: {alloc_gb:.1f} GB")
     
     # Shift for next-token prediction
     shift_logits = logits[..., :-1, :].contiguous()
