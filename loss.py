@@ -121,7 +121,6 @@ def heteroscedastic_uncertainty_loss(model, inputs, trainer_context) -> LossResu
 
     # Debug: log dtype and memory info (critical for diagnosing fp32 OOM)
     if debug or logits.dtype == torch.float32:
-        import torch.cuda
         tensor_gb = logits.nelement() * logits.element_size() / 1024**3
         print(f"[LOSS] logits dtype: {logits.dtype}, shape: {logits.shape}, "
               f"tensor size: {tensor_gb:.1f} GB")
