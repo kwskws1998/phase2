@@ -9,6 +9,9 @@ Supports both parallel (default, faster) and sequential (lower memory) modes.
 
 import torch
 
+# Module-level flag: print fp32→bf16 warning only once (not every step)
+_fp32_warned = False
+
 
 def compute_heteroscedastic_log_probs(logits, labels, T=3, sequential=False, debug=False, return_sigma=False):
     """
@@ -226,10 +229,12 @@ def _compute_learned_heteroscedastic_parallel(logits, log_variance, labels, T):
     Faster but uses T times more memory.
     """
     # Force bf16 if logits are fp32 — prevents catastrophic memory blowup
+    global _fp32_warned
     compute_dtype = logits.dtype
     if compute_dtype == torch.float32 and torch.cuda.is_available():
-        print(f"[MC-parallel WARNING] logits are float32! Casting to bfloat16. "
-              f"Shape: {logits.shape}")
+        if not _fp32_warned:
+            print(f"[MC WARNING] logits are float32 — casting to bfloat16 to prevent OOM")
+            _fp32_warned = True
         logits = logits.to(torch.bfloat16)
         log_variance = log_variance.to(torch.bfloat16)
 
@@ -298,23 +303,18 @@ def _compute_learned_heteroscedastic_sequential(logits, log_variance, labels, T)
     Memory-efficient but slower. Uses single-sample gradient estimation.
     """
     # Force bf16 if logits are fp32 — prevents 2x memory blowup with large vocab
-    # vocab_size=131072 × seq_len=40960 → bf16: 10.7GB, fp32: 21.4GB per tensor!
+    global _fp32_warned
     compute_dtype = logits.dtype
     if compute_dtype == torch.float32 and torch.cuda.is_available():
-        print(f"[MC WARNING] logits are float32! Casting to bfloat16 to prevent OOM. "
-              f"Shape: {logits.shape}, "
-              f"fp32 size: {logits.nelement() * 4 / 1024**3:.1f} GB → "
-              f"bf16 size: {logits.nelement() * 2 / 1024**3:.1f} GB")
+        if not _fp32_warned:
+            print(f"[MC WARNING] logits are float32 — casting to bfloat16 to prevent OOM")
+            _fp32_warned = True
         compute_dtype = torch.bfloat16
         logits = logits.to(torch.bfloat16)
         log_variance = log_variance.to(torch.bfloat16)
     else:
         logits = logits.to(compute_dtype)
         log_variance = log_variance.to(compute_dtype)
-
-    tensor_gb = logits.nelement() * logits.element_size() / 1024**3
-    print(f"[MC] dtype: {compute_dtype}, shape: {logits.shape}, "
-          f"tensor size: {tensor_gb:.1f} GB, T={T}")
 
     batch_size, seq_len, vocab_size = logits.shape
 
