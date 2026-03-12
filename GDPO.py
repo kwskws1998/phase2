@@ -1616,34 +1616,6 @@ class HeteroscedasticGDPOLoss(GDPOBase):
         prob_correct = torch.exp(prob_correct_log.clamp(max=0))
         prob_correct_per_sample = (prob_correct * combined_mask).sum(dim=1) / (combined_mask.sum(dim=1) + eps)
         uncertainty_scores = 1 - prob_correct_per_sample
-      
-        # # 4. Compute uncertainty (reasoning-only by default, full sequence if configured)
-        # if self.uncertainty_full_sequence:
-        #     # Full sequence uncertainty
-        #     prob_correct, uncertainty_scores = self.compute_uncertainty(
-        #         shift_logits, shift_labels, valid_mask
-        #     )
-        # else:
-        #     # Reasoning-only uncertainty (default)
-        #     reasoning_mask = self.get_reasoning_mask(sequences)
-        #     prob_correct, uncertainty_scores = self.compute_uncertainty(
-        #         shift_logits, shift_labels, valid_mask, reasoning_mask
-        #     )
-        
-        # # 5. Reasoning judge
-        # has_judge = self.enable_reasoning_judge
-        # rq_scores = self.judge_rollout_reasoning(sequences, input_ids, expanded_refs) if has_judge else None
-        
-        # # 6. Determine num_objectives
-        # has_tool_reward = self.enable_tool_reward
-        # if has_tool_reward:
-        #     n = 6  # Format, Length, Tool Format, Accuracy, Uncertainty, Tool Correctness
-        # else:
-        #     n = 4  # Format, Length, Accuracy, Uncertainty
-        # if has_judge:
-        #     n += 1
-        # if temp_rewards is not None:
-        #     n += 1
 
         # 7. Compute rewards
         reward_config = self.build_reward_config()
