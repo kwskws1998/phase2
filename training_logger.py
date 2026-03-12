@@ -32,6 +32,8 @@ class LossResult:
     total_loss: torch.Tensor
     components: Dict[str, float] = field(default_factory=dict)
     outputs: Any = None
+    predicted_ids: Any = None   # pre-computed argmax (when outputs freed for VRAM)
+    response_mask: Any = None   # valid token mask for accuracy calc
     
     @property
     def component_names(self) -> List[str]:

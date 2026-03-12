@@ -135,15 +135,15 @@ def run_training(args):
                     valid_label_ids = label_ids[response_mask]
                     if len(valid_label_ids) > 0:
                         label_text = self.processing_class.decode(
-                            valid_label_ids, skip_special_tokens=True
+                            valid_label_ids, skip_special_tokens=False
                         )
                 
-                # Calculate train accuracy from logits
+                # Calculate train accuracy and predict_text from logits
                 train_accuracy = None
                 if loss_result.outputs is not None and hasattr(loss_result.outputs, 'logits'):
                     logits = loss_result.outputs.logits
                     labels = inputs.get("labels")
-                    
+
                     if logits is not None and labels is not None:
                         # Shift for next-token prediction (logits[i] predicts labels[i+1])
                         shift_logits = logits[..., :-1, :]
@@ -153,17 +153,39 @@ def run_training(args):
                         correct = ((preds == shift_labels) & mask).sum().item()
                         total = mask.sum().item()
                         train_accuracy = (correct / total * 100) if total > 0 else 0.0
-                    
+
                     # Generate predict_text for logging
                     predicted_ids = logits.argmax(dim=-1)
                     seq_len = len(predicted_ids[0])
                     if "attention_mask" in inputs and inputs["attention_mask"] is not None:
                         seq_len = inputs["attention_mask"][0].sum().item()
-                    
+
                     predict_ids = predicted_ids[0][response_start:seq_len]
                     if len(predict_ids) > 0:
                         predict_text = self.processing_class.decode(
-                            predict_ids, skip_special_tokens=True
+                            predict_ids, skip_special_tokens=False
+                        )
+
+                elif loss_result.predicted_ids is not None:
+                    # Fallback: use pre-computed prediction info (heteroscedastic case)
+                    # outputs were freed for VRAM, but predicted_ids were saved beforehand
+                    preds = loss_result.predicted_ids
+                    mask = loss_result.response_mask
+                    shift_labels = inputs["labels"][..., 1:]
+                    correct = ((preds == shift_labels) & mask).sum().item()
+                    total = mask.sum().item()
+                    train_accuracy = (correct / total * 100) if total > 0 else 0.0
+
+                    # predict_text: response_start is in unshifted space, adjust -1 for shifted ids
+                    pred_start = max(response_start - 1, 0)
+                    seq_len = len(preds[0])
+                    if "attention_mask" in inputs and inputs["attention_mask"] is not None:
+                        seq_len = min(inputs["attention_mask"][0].sum().item() - 1, seq_len)
+
+                    predict_ids = preds[0][pred_start:seq_len]
+                    if len(predict_ids) > 0:
+                        predict_text = self.processing_class.decode(
+                            predict_ids, skip_special_tokens=False
                         )
                 
                 current_epoch = int(self.state.epoch) + 1 if self.state.epoch is not None else 1
